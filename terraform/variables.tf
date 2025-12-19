@@ -2,22 +2,22 @@
 # VARIABLES PRINCIPALES
 # ============================================================
 
-variable "subscription_id" {
+variable "AZURE_SUBSCRIPTION_ID" {
   description = "ID de la suscripción de Azure"
   type        = string
 }
 
-variable "tenant_id" {
+variable "AZURE_TENANT_ID" {
   description = "ID del tenant de Azure"
   type        = string
 }
 
-variable "location" {
+variable "LOCATION" {
   description = "Ubicación de los recursos (por ejemplo: eastus2)"
   type        = string
 }
 
-variable "resource_group_name" {
+variable "RESOURCE_GROUP_NAME" {
   description = "Nombre del grupo de recursos"
   type        = string
 }
@@ -26,7 +26,7 @@ variable "resource_group_name" {
 # VIRTUAL NETWORK Y SUBNETS
 # ============================================================
 
-variable "vnet_name" {
+variable "VNET_NAME" {
   description = "Nombre de la red virtual principal"
   type        = string
 }
@@ -35,22 +35,22 @@ variable "vnet_name" {
 # APP SERVICE PLANS Y WEB APPS
 # ============================================================
 
-variable "app_service_plan_name" {
+variable "APP_SERVICE_PLAN_NAME" {
   description = "Nombre del App Service Plan para backend (Linux)"
   type        = string
 }
 
-variable "app_service_plan_name_web" {
-  description = "Nombre del App Service Plan para frontend (Windows)"
+variable "APP_SERVICE_PLAN_NAME_WEB" {
+  description = "Nombre del App Service Plan para frontend (Linux)"
   type        = string
 }
 
-variable "app_service_name" {
+variable "APP_SERVICE_NAME" {
   description = "Nombre del App Service backend"
   type        = string
 }
 
-variable "app_service_name_web" {
+variable "APP_SERVICE_NAME_WEB" {
   description = "Nombre del App Service frontend"
   type        = string
 }
@@ -59,37 +59,39 @@ variable "app_service_name_web" {
 # CERTIFICADO PARA APPLICATION GATEWAY
 # ============================================================
 
-variable "cert_data" {
+variable "CERT_DATA" {
   description = "Certificado SSL codificado en base64"
   type        = string
+  sensitive   = true
 }
 
-variable "cert_password" {
+variable "CERT_PASSWORD" {
   description = "Contraseña del certificado SSL"
   type        = string
+  sensitive   = true
 }
 
 # ============================================================
 # BASE DE DATOS SQL SERVER
 # ============================================================
 
-variable "sql_server_name" {
+variable "SQL_SERVER_NAME" {
   description = "Nombre del servidor SQL"
   type        = string
 }
 
-variable "sql_admin_login" {
+variable "SQL_ADMIN_LOGIN" {
   description = "Usuario administrador del SQL Server"
   type        = string
 }
 
-variable "sql_admin_password" {
+variable "SQL_ADMIN_PASSWORD" {
   description = "Contraseña del usuario administrador del SQL Server"
   type        = string
   sensitive   = true
 }
 
-variable "database_name" {
+variable "DATABASE_NAME" {
   description = "Nombre de la base de datos"
   type        = string
 }
@@ -98,12 +100,12 @@ variable "database_name" {
 # KEY VAULT Y STORAGE
 # ============================================================
 
-variable "key_vault_name" {
+variable "KEY_VAULT_NAME" {
   description = "Nombre del Key Vault principal"
   type        = string
 }
 
-variable "storage_account_name" {
+variable "STORAGE_ACCOUNT_NAME" {
   description = "Nombre de la cuenta de almacenamiento (Blob)"
   type        = string
 }
@@ -112,45 +114,29 @@ variable "storage_account_name" {
 # OBSERVABILIDAD - ETAPA 4
 # ============================================================
 
-variable "log_analytics_workspace_name" {
+variable "LOG_ANALYTICS_WORKSPACE_NAME" {
   description = "Nombre del Log Analytics Workspace"
   type        = string
   default     = "law-dojo-observability"
 }
 
-variable "application_insights_name" {
+variable "APPLICATION_INSIGHTS_NAME" {
   description = "Nombre de Application Insights"
   type        = string
   default     = "appi-dojo-observability"
 }
 
-variable "enable_elasticsearch" {
+variable "ENABLE_ELASTICSEARCH" {
   description = "Habilitar Elasticsearch y Kibana (true/false)"
   type        = bool
   default     = false
 }
 
 # ============================================================
-# OPCIONAL: SUBNETS COMO MAPA (si deseas manejarlo dinámico)
+# IDENTIDAD FEDERADA (OIDC) DE GITHUB ACTIONS
 # ============================================================
 
-variable "subnets" {
-  description = "Mapa de subnets (para compatibilidad o migración futura)"
-  type        = map(string)
-  default = {
-    agw          = "subnet-agw"
-    appservices  = "subnet-appservices"
-    integration  = "subnet-integration"
-    privateend   = "subnet-pe"
-    containers   = "subnet-containers"
-  }
-}
-
-# ============================================================
-# ID de la identidad federada (OIDC) de GitHub Actions
-# ============================================================
-
-variable "azure_client_id" {
+variable "AZURE_CLIENT_ID" {
   description = "Client ID de la identidad federada de GitHub (OIDC)"
   type        = string
 }
@@ -159,12 +145,12 @@ variable "azure_client_id" {
 # KEY VAULT – ROLES (GitHub OIDC y tu usuario admin)
 # ============================================================
 
-variable "github_principal_id" {
+variable "GITHUB_PRINCIPAL_ID" {
   description = "Object ID del Service Principal federado (OIDC) usado por GitHub Actions"
   type        = string
 }
 
-variable "admin_user_object_id" {
+variable "ADMIN_USER_OBJECT_ID" {
   description = "Object ID de tu usuario personal en Azure AD (para rol Key Vault Admin)"
   type        = string
 }

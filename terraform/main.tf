@@ -13,8 +13,8 @@ terraform {
 
 provider "azurerm" {
   features {}
-  subscription_id = var.subscription_id
-  tenant_id       = var.tenant_id
+  subscription_id = var.AZURE_SUBSCRIPTION_ID
+  tenant_id       = var.AZURE_TENANT_ID
 }
 
 provider "time" {}
@@ -24,8 +24,8 @@ provider "time" {}
 # ============================================================
 
 resource "azurerm_resource_group" "rg" {
-  name     = var.resource_group_name
-  location = var.location
+  name     = var.RESOURCE_GROUP_NAME
+  location = var.LOCATION
 }
 
 # ============================================================
@@ -33,8 +33,8 @@ resource "azurerm_resource_group" "rg" {
 # ============================================================
 
 resource "azurerm_virtual_network" "vnet" {
-  name                = var.vnet_name
-  location            = var.location
+  name                = var.VNET_NAME
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
   address_space       = ["10.0.0.0/16"]
 }
@@ -110,8 +110,8 @@ resource "azurerm_subnet" "subnet_containers" {
 # ============================================================
 
 resource "azurerm_service_plan" "plan_backend" {
-  name                = var.app_service_plan_name
-  location            = var.location
+  name                = var.APP_SERVICE_PLAN_NAME
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
   os_type             = "Linux"
   sku_name            = "B2" # Upgraded for Spring Boot
@@ -122,8 +122,8 @@ resource "azurerm_service_plan" "plan_backend" {
 # ============================================================
 
 resource "azurerm_linux_web_app" "backend" {
-  name                = var.app_service_name
-  location            = var.location
+  name                = var.APP_SERVICE_NAME
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
   service_plan_id     = azurerm_service_plan.plan_backend.id
 
@@ -144,9 +144,9 @@ resource "azurerm_linux_web_app" "backend" {
     APP_ENV   = "production"
     DB_CONNECTION = "sqlsrv"
     DB_HOST       = azurerm_mssql_server.sql_server.fully_qualified_domain_name
-    DB_DATABASE = "@Microsoft.KeyVault(SecretUri=https://${var.key_vault_name}.vault.azure.net/secrets/db-database/)"
-    DB_USERNAME = "@Microsoft.KeyVault(SecretUri=https://${var.key_vault_name}.vault.azure.net/secrets/db-username/)"
-    DB_PASSWORD = "@Microsoft.KeyVault(SecretUri=https://${var.key_vault_name}.vault.azure.net/secrets/db-password/)"
+    DB_DATABASE = "@Microsoft.KeyVault(SecretUri=https://${var.KEY_VAULT_NAME}.vault.azure.net/secrets/db-database/)"
+    DB_USERNAME = "@Microsoft.KeyVault(SecretUri=https://${var.KEY_VAULT_NAME}.vault.azure.net/secrets/db-username/)"
+    DB_PASSWORD = "@Microsoft.KeyVault(SecretUri=https://${var.KEY_VAULT_NAME}.vault.azure.net/secrets/db-password/)"
     
     # OpenTelemetry configuration
     OTEL_EXPORTER_OTLP_ENDPOINT = "http://${azurerm_container_group.otel_collector.ip_address}:4317"
@@ -167,8 +167,8 @@ resource "azurerm_app_service_virtual_network_swift_connection" "backend_vnet" {
 # ============================================================
 
 resource "azurerm_service_plan" "plan_frontend" {
-  name                = var.app_service_plan_name_web
-  location            = var.location
+  name                = var.APP_SERVICE_PLAN_NAME_WEB
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
   os_type             = "Linux"
   sku_name            = "B1"
@@ -179,8 +179,8 @@ resource "azurerm_service_plan" "plan_frontend" {
 # ============================================================
 
 resource "azurerm_linux_web_app" "frontend" {
-  name                = var.app_service_name_web
-  location            = var.location
+  name                = var.APP_SERVICE_NAME_WEB
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
   service_plan_id     = azurerm_service_plan.plan_frontend.id
 
@@ -217,10 +217,10 @@ resource "azurerm_app_service_virtual_network_swift_connection" "frontend_vnet" 
 # ============================================================
 
 resource "azurerm_key_vault" "kv" {
-  name                = var.key_vault_name
+  name                = var.KEY_VAULT_NAME
   resource_group_name = azurerm_resource_group.rg.name
   location            = azurerm_resource_group.rg.location
-  tenant_id           = var.tenant_id
+  tenant_id           = var.AZURE_TENANT_ID
 
   sku_name                   = "standard"
   soft_delete_retention_days = 7
@@ -236,14 +236,14 @@ resource "azurerm_key_vault" "kv" {
 resource "azurerm_role_assignment" "github_kv_secrets" {
   scope                = azurerm_key_vault.kv.id
   role_definition_name = "Key Vault Secrets Officer"
-  principal_id         = var.github_principal_id
+  principal_id         = var.GITHUB_PRINCIPAL_ID
 }
 
 # Tu usuario - Administración completa del Key Vault
 resource "azurerm_role_assignment" "user_kv_admin" {
   scope                = azurerm_key_vault.kv.id
   role_definition_name = "Key Vault Administrator"
-  principal_id         = var.admin_user_object_id
+  principal_id         = var.ADMIN_USER_OBJECT_ID
 }
 
 # Backend App Service - Puede leer secrets en runtime
@@ -269,7 +269,7 @@ resource "time_sleep" "wait_for_iam" {
 
 resource "azurerm_key_vault_secret" "db_database" {
   name         = "db-database"
-  value        = var.database_name
+  value        = var.DATABASE_NAME
   key_vault_id = azurerm_key_vault.kv.id
   lifecycle { ignore_changes = [value] }
   depends_on = [time_sleep.wait_for_iam]
@@ -277,7 +277,7 @@ resource "azurerm_key_vault_secret" "db_database" {
 
 resource "azurerm_key_vault_secret" "db_username" {
   name         = "db-username"
-  value        = var.sql_admin_login
+  value        = var.SQL_ADMIN_LOGIN
   key_vault_id = azurerm_key_vault.kv.id
   lifecycle { ignore_changes = [value] }
   depends_on = [time_sleep.wait_for_iam]
@@ -285,7 +285,7 @@ resource "azurerm_key_vault_secret" "db_username" {
 
 resource "azurerm_key_vault_secret" "db_password" {
   name         = "db-password"
-  value        = var.sql_admin_password
+  value        = var.SQL_ADMIN_PASSWORD
   key_vault_id = azurerm_key_vault.kv.id
   lifecycle { ignore_changes = [value] }
   depends_on = [time_sleep.wait_for_iam]
@@ -296,17 +296,17 @@ resource "azurerm_key_vault_secret" "db_password" {
 # ============================================================
 
 resource "azurerm_mssql_server" "sql_server" {
-  name                          = var.sql_server_name
+  name                          = var.SQL_SERVER_NAME
   resource_group_name           = azurerm_resource_group.rg.name
-  location                      = var.location
+  location                      = var.LOCATION
   version                       = "12.0"
-  administrator_login           = var.sql_admin_login
-  administrator_login_password  = var.sql_admin_password
+  administrator_login           = var.SQL_ADMIN_LOGIN
+  administrator_login_password  = var.SQL_ADMIN_PASSWORD
   public_network_access_enabled = false
 }
 
 resource "azurerm_mssql_database" "database" {
-  name      = var.database_name
+  name      = var.DATABASE_NAME
   server_id = azurerm_mssql_server.sql_server.id
   sku_name  = "Basic"
 }
@@ -316,9 +316,9 @@ resource "azurerm_mssql_database" "database" {
 # ============================================================
 
 resource "azurerm_storage_account" "storage" {
-  name                     = var.storage_account_name
+  name                     = var.STORAGE_ACCOUNT_NAME
   resource_group_name      = azurerm_resource_group.rg.name
-  location                 = var.location
+  location                 = var.LOCATION
   account_tier             = "Standard"
   account_replication_type = "LRS"
   public_network_access_enabled = false
@@ -339,8 +339,8 @@ resource "azurerm_storage_container" "container" {
 # ------------------------------------------------------------
 
 resource "azurerm_log_analytics_workspace" "law" {
-  name                = var.log_analytics_workspace_name
-  location            = var.location
+  name                = var.LOG_ANALYTICS_WORKSPACE_NAME
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
   sku                 = "PerGB2018"
   retention_in_days   = 30
@@ -351,8 +351,8 @@ resource "azurerm_log_analytics_workspace" "law" {
 # ------------------------------------------------------------
 
 resource "azurerm_application_insights" "app_insights" {
-  name                = var.application_insights_name
-  location            = var.location
+  name                = var.APPLICATION_INSIGHTS_NAME
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
   workspace_id        = azurerm_log_analytics_workspace.law.id
   application_type    = "web"
@@ -364,7 +364,7 @@ resource "azurerm_application_insights" "app_insights" {
 
 resource "azurerm_network_profile" "aci_profile" {
   name                = "aci-network-profile"
-  location            = var.location
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
 
   container_network_interface {
@@ -383,7 +383,7 @@ resource "azurerm_network_profile" "aci_profile" {
 
 resource "azurerm_container_group" "otel_collector" {
   name                = "otel-collector"
-  location            = var.location
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
   os_type             = "Linux"
   network_profile_id  = azurerm_network_profile.aci_profile.id
@@ -430,9 +430,9 @@ resource "azurerm_container_group" "otel_collector" {
 # ------------------------------------------------------------
 
 resource "azurerm_container_group" "elasticsearch" {
-  count               = var.enable_elasticsearch ? 1 : 0
+  count               = var.ENABLE_ELASTICSEARCH ? 1 : 0
   name                = "elasticsearch"
-  location            = var.location
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
   os_type             = "Linux"
   network_profile_id  = azurerm_network_profile.aci_profile.id
@@ -478,9 +478,9 @@ resource "azurerm_container_group" "elasticsearch" {
 # ------------------------------------------------------------
 
 resource "azurerm_container_group" "kibana" {
-  count               = var.enable_elasticsearch ? 1 : 0
+  count               = var.ENABLE_ELASTICSEARCH ? 1 : 0
   name                = "kibana"
-  location            = var.location
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
   os_type             = "Linux"
   network_profile_id  = azurerm_network_profile.aci_profile.id
@@ -517,7 +517,7 @@ resource "azurerm_container_group" "kibana" {
 
 resource "azurerm_public_ip" "appgw_ip" {
   name                = "appgw-public-ip"
-  location            = var.location
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
   allocation_method   = "Static"
   sku                 = "Standard"
@@ -529,7 +529,7 @@ resource "azurerm_public_ip" "appgw_ip" {
 
 resource "azurerm_private_endpoint" "backend_pe" {
   name                = "pe-backend"
-  location            = var.location
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
   subnet_id           = azurerm_subnet.subnet_pe.id
 
@@ -548,7 +548,7 @@ resource "azurerm_private_endpoint" "backend_pe" {
 
 resource "azurerm_private_endpoint" "frontend_pe" {
   name                = "pe-frontend"
-  location            = var.location
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
   subnet_id           = azurerm_subnet.subnet_pe.id
 
@@ -567,7 +567,7 @@ resource "azurerm_private_endpoint" "frontend_pe" {
 
 resource "azurerm_private_endpoint" "sql_pe" {
   name                = "pe-sqlserver1"
-  location            = var.location
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
   subnet_id           = azurerm_subnet.subnet_pe.id
 
@@ -586,7 +586,7 @@ resource "azurerm_private_endpoint" "sql_pe" {
 
 resource "azurerm_private_endpoint" "keyvault_pe" {
   name                = "pe-keyvault"
-  location            = var.location
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
   subnet_id           = azurerm_subnet.subnet_pe.id
 
@@ -605,7 +605,7 @@ resource "azurerm_private_endpoint" "keyvault_pe" {
 
 resource "azurerm_private_endpoint" "blob_pe" {
   name                = "pe-blobstorage"
-  location            = var.location
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
   subnet_id           = azurerm_subnet.subnet_pe.id
 
@@ -628,7 +628,7 @@ resource "azurerm_private_endpoint" "blob_pe" {
 
 resource "azurerm_application_gateway" "appgw" {
   name                = "dojo-appgw"
-  location            = var.location
+  location            = var.LOCATION
   resource_group_name = azurerm_resource_group.rg.name
 
   sku {
@@ -654,8 +654,8 @@ resource "azurerm_application_gateway" "appgw" {
 
   ssl_certificate {
     name     = "cert-app-dojo"
-    data     = var.cert_data
-    password = var.cert_password
+    data     = var.CERT_DATA
+    password = var.CERT_PASSWORD
   }
 
   http_listener {
