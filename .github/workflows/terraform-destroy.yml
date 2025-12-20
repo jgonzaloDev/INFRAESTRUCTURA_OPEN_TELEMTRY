@@ -1,0 +1,107 @@
+name: Terraform Destroy - OpenTelemetry Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type "destroy" to confirm deletion of all resources'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1️⃣ Validar confirmación
+      - name: Validate Confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirmation }}" != "destroy" ]; then
+            echo "❌ Confirmation failed. You must type 'destroy' to proceed."
+            exit 1
+          fi
+          echo "✅ Confirmation validated"
+
+      # 2️⃣ Checkout del repo
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # 3️⃣ Login en Azure usando OIDC
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # 4️⃣ Instalar Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+
+      # 5️⃣ Terraform Init
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init
+
+      # 6️⃣ Terraform Destroy
+      - name: Terraform Destroy
+        working-directory: ./terraform
+        run: terraform destroy -auto-approve
+        env:
+          # 🔵 Azure principales
+          TF_VAR_AZURE_SUBSCRIPTION_ID:     ${{ secrets.TF_VAR_AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_AZURE_TENANT_ID:           ${{ secrets.TF_VAR_AZURE_TENANT_ID }}
+          TF_VAR_LOCATION:                  ${{ secrets.TF_VAR_LOCATION }}
+          TF_VAR_RESOURCE_GROUP_NAME:       ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }}
+          
+          # 🌐 Red
+          TF_VAR_VNET_NAME:                 ${{ secrets.TF_VAR_VNET_NAME }}
+          
+          # 🐘 SQL Server
+          TF_VAR_SQL_SERVER_NAME:           ${{ secrets.TF_VAR_SQL_SERVER_NAME }}
+          TF_VAR_DATABASE_NAME:             ${{ secrets.TF_VAR_DATABASE_NAME }}
+          TF_VAR_SQL_ADMIN_LOGIN:           ${{ secrets.TF_VAR_SQL_ADMIN_LOGIN }}
+          TF_VAR_SQL_ADMIN_PASSWORD:        ${{ secrets.TF_VAR_SQL_ADMIN_PASSWORD }}
+          
+          # 🕸 App Services
+          TF_VAR_APP_SERVICE_PLAN_NAME:     ${{ secrets.TF_VAR_APP_SERVICE_PLAN_NAME }}
+          TF_VAR_APP_SERVICE_PLAN_NAME_WEB: ${{ secrets.TF_VAR_APP_SERVICE_PLAN_NAME_WEB }}
+          TF_VAR_APP_SERVICE_NAME:          ${{ secrets.TF_VAR_APP_SERVICE_NAME }}
+          TF_VAR_APP_SERVICE_NAME_WEB:      ${{ secrets.TF_VAR_APP_SERVICE_NAME_WEB }}
+          
+          # 🔐 Key Vault
+          TF_VAR_KEY_VAULT_NAME:            ${{ secrets.TF_VAR_KEY_VAULT_NAME }}
+          
+          # 🧑‍💼 Usuarios y permisos
+          TF_VAR_ADMIN_USER_OBJECT_ID:      ${{ secrets.TF_VAR_ADMIN_USER_OBJECT_ID }}
+          TF_VAR_GITHUB_PRINCIPAL_ID:       ${{ secrets.TF_VAR_GITHUB_PRINCIPAL_ID }}
+          TF_VAR_AZURE_CLIENT_ID:           ${{ secrets.TF_VAR_AZURE_CLIENT_ID }}
+          
+          # 📦 Storage
+          TF_VAR_STORAGE_ACCOUNT_NAME:      ${{ secrets.TF_VAR_STORAGE_ACCOUNT_NAME }}
+          
+          # 📜 Certificado SSL
+          TF_VAR_CERT_DATA:                 ${{ secrets.TF_VAR_CERT_DATA }}
+          TF_VAR_CERT_PASSWORD:             ${{ secrets.TF_VAR_CERT_PASSWORD }}
+          
+          # 📊 Observabilidad
+          TF_VAR_LOG_ANALYTICS_WORKSPACE_NAME: ${{ secrets.TF_VAR_LOG_ANALYTICS_WORKSPACE_NAME }}
+          TF_VAR_APPLICATION_INSIGHTS_NAME:    ${{ secrets.TF_VAR_APPLICATION_INSIGHTS_NAME }}
+          TF_VAR_ENABLE_ELASTICSEARCH:         ${{ secrets.TF_VAR_ENABLE_ELASTICSEARCH }}
+
+      # 7️⃣ Destruction Summary
+      - name: Destruction Summary
+        run: |
+          echo "## 🗑️ Infrastructure Destroyed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All Azure resources have been deleted." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ **Note**: Key Vault has soft-delete enabled and will be retained for 7 days." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Destruction Time:** $(date)" >> $GITHUB_STEP_SUMMARY

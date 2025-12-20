@@ -1,0 +1,96 @@
+name: Terraform Apply - OpenTelemetry Infrastructure
+
+on:
+  workflow_dispatch:
+
+jobs:
+  apply-main:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    
+    steps:
+      # 1️⃣ Checkout del repo
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # 2️⃣ Login en Azure usando OIDC
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # 3️⃣ Instalar Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+
+      # 4️⃣ Terraform Init
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init
+
+      # 5️⃣ Terraform Apply
+      - name: Terraform Apply
+        working-directory: ./terraform
+        run: terraform apply -auto-approve
+        env:
+          # 🔵 Azure principales
+          TF_VAR_AZURE_SUBSCRIPTION_ID:     ${{ secrets.TF_VAR_AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_AZURE_TENANT_ID:           ${{ secrets.TF_VAR_AZURE_TENANT_ID }}
+          TF_VAR_LOCATION:                  ${{ secrets.TF_VAR_LOCATION }}
+          TF_VAR_RESOURCE_GROUP_NAME:       ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }}
+          
+          # 🌐 Red
+          TF_VAR_VNET_NAME:                 ${{ secrets.TF_VAR_VNET_NAME }}
+          
+          # 🐘 SQL Server
+          TF_VAR_SQL_SERVER_NAME:           ${{ secrets.TF_VAR_SQL_SERVER_NAME }}
+          TF_VAR_DATABASE_NAME:             ${{ secrets.TF_VAR_DATABASE_NAME }}
+          TF_VAR_SQL_ADMIN_LOGIN:           ${{ secrets.TF_VAR_SQL_ADMIN_LOGIN }}
+          TF_VAR_SQL_ADMIN_PASSWORD:        ${{ secrets.TF_VAR_SQL_ADMIN_PASSWORD }}
+          
+          # 🕸 App Services (backend y frontend)
+          TF_VAR_APP_SERVICE_PLAN_NAME:     ${{ secrets.TF_VAR_APP_SERVICE_PLAN_NAME }}
+          TF_VAR_APP_SERVICE_PLAN_NAME_WEB: ${{ secrets.TF_VAR_APP_SERVICE_PLAN_NAME_WEB }}
+          TF_VAR_APP_SERVICE_NAME:          ${{ secrets.TF_VAR_APP_SERVICE_NAME }}
+          TF_VAR_APP_SERVICE_NAME_WEB:      ${{ secrets.TF_VAR_APP_SERVICE_NAME_WEB }}
+          
+          # 🔐 Key Vault
+          TF_VAR_KEY_VAULT_NAME:            ${{ secrets.TF_VAR_KEY_VAULT_NAME }}
+          
+          # 🧑‍💼 Usuarios y permisos
+          TF_VAR_ADMIN_USER_OBJECT_ID:      ${{ secrets.TF_VAR_ADMIN_USER_OBJECT_ID }}
+          TF_VAR_GITHUB_PRINCIPAL_ID:       ${{ secrets.TF_VAR_GITHUB_PRINCIPAL_ID }}
+          TF_VAR_AZURE_CLIENT_ID:           ${{ secrets.TF_VAR_AZURE_CLIENT_ID }}
+          
+          # 📦 Storage
+          TF_VAR_STORAGE_ACCOUNT_NAME:      ${{ secrets.TF_VAR_STORAGE_ACCOUNT_NAME }}
+          
+          # 📜 Certificado SSL
+          TF_VAR_CERT_DATA:                 ${{ secrets.TF_VAR_CERT_DATA }}
+          TF_VAR_CERT_PASSWORD:             ${{ secrets.TF_VAR_CERT_PASSWORD }}
+          
+          # 📊 Observabilidad
+          TF_VAR_LOG_ANALYTICS_WORKSPACE_NAME: ${{ secrets.TF_VAR_LOG_ANALYTICS_WORKSPACE_NAME }}
+          TF_VAR_APPLICATION_INSIGHTS_NAME:    ${{ secrets.TF_VAR_APPLICATION_INSIGHTS_NAME }}
+          TF_VAR_ENABLE_ELASTICSEARCH:         ${{ secrets.TF_VAR_ENABLE_ELASTICSEARCH }}
+
+      # 6️⃣ Resumen del despliegue
+      - name: Deployment Summary
+        run: |
+          echo "## ✅ Deployment Successful!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Infrastructure Deployed:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Resource Group: ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Location: ${{ secrets.TF_VAR_LOCATION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Backend App: ${{ secrets.TF_VAR_APP_SERVICE_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend App: ${{ secrets.TF_VAR_APP_SERVICE_NAME_WEB }}" >> $GITHUB_STEP_SUMMARY
+          echo "- SQL Server: ${{ secrets.TF_VAR_SQL_SERVER_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Deployment Time:** $(date)" >> $GITHUB_STEP_SUMMARY
