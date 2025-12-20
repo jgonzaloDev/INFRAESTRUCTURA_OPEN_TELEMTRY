@@ -455,7 +455,6 @@ resource "azurerm_container_group" "otel_collector" {
   location            = var.location
   resource_group_name = azurerm_resource_group.rg.name
   os_type             = "Linux"
-  dns_name_label      = "${var.resource_group_name}-otel"
 
   container {
     name   = "otel-collector"
