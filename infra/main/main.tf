@@ -423,7 +423,7 @@ resource "azurerm_container_group" "elasticsearch" {
       mount_path           = "/usr/share/elasticsearch/data"
       storage_account_name = azurerm_storage_account.storage.name
       storage_account_key  = azurerm_storage_account.storage.primary_access_key
-      share_name          = azurerm_storage_share.elasticsearch.name
+      share_name          = azurerm_storage_share.elasticsearch[0].name
     }
   }
 
