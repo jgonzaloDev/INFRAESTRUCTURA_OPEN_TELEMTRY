@@ -153,7 +153,7 @@ resource "azurerm_linux_web_app" "backend" {
     "ELASTICSEARCH_PORT"    = "9200"
     
     # OpenTelemetry Configuration
-    "OTEL_EXPORTER_OTLP_ENDPOINT" = var.enable_otel == "true" ? "http://${azurerm_container_group.otel_collector[0].ip_address}:4317" : ""
+    "OTEL_EXPORTER_OTLP_ENDPOINT" = var.enable_otel == "true" ? "http://${azurerm_container_group.otel_collector[0].ip_address}:4318" : ""
     "OTEL_SERVICE_NAME"           = "spring-boot-backend"
     "OTEL_TRACES_EXPORTER"        = "otlp"
     "OTEL_METRICS_EXPORTER"       = "otlp"
