@@ -444,14 +444,9 @@ resource "azurerm_storage_share" "elasticsearch" {
   quota                = 50
 }
 
-# 1. Crear File Share para la configuración del OTel Collector
-resource "azurerm_storage_share" "otel_config" {
-  count                = var.enable_otel == "true" ? 1 : 0
-  name                 = "otel-config"
-  storage_account_name = azurerm_storage_account.main.name
-}
+
 # ============================================================
-# OTEL COLLECTOR - FILE SHARE Y CONFIGURACIÓN
+# OTEL COLLECTOR - FILE SHARE Y CONFIGURACIÓN  
 # ============================================================
 
 resource "azurerm_storage_share" "otel_config" {
@@ -531,7 +526,6 @@ resource "azurerm_container_group" "otel_collector" {
     azurerm_storage_share_file.otel_config_yaml
   ]
 }
-
 
 # =================================================================================
 # Private Endpoints
