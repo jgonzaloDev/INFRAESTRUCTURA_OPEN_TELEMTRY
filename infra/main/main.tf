@@ -449,10 +449,19 @@ resource "azurerm_storage_share" "otel_config" {
   count                = var.enable_otel == "true" ? 1 : 0
   name                 = "otel-config"
   storage_account_name = azurerm_storage_account.main.name
-  quota                = 1 # 1 GB es suficiente para config
+# ============================================================
+# OTEL COLLECTOR - FILE SHARE Y CONFIGURACIÓN
+# ============================================================
+
+# File Share para la configuración del OTel Collector
+resource "azurerm_storage_share" "otel_config" {
+  count                = var.enable_otel == "true" ? 1 : 0
+  name                 = "otel-config"
+  storage_account_name = azurerm_storage_account.storage.name
+  quota                = 1
 }
 
-# 2. Subir el archivo de configuración al File Share
+# Subir el archivo de configuración al File Share
 resource "azurerm_storage_share_file" "otel_config_yaml" {
   count            = var.enable_otel == "true" ? 1 : 0
   name             = "otel-collector-config.yaml"
@@ -460,7 +469,10 @@ resource "azurerm_storage_share_file" "otel_config_yaml" {
   source           = "${path.module}/otel-collector-config.yaml"
 }
 
-# 3. OTel Collector con configuración montada
+# ============================================================
+# OTEL COLLECTOR - CONTAINER INSTANCE
+# ============================================================
+
 resource "azurerm_container_group" "otel_collector" {
   count               = var.enable_otel == "true" ? 1 : 0
   name                = "otel-collector-container"
@@ -493,6 +505,40 @@ resource "azurerm_container_group" "otel_collector" {
     }
 
     environment_variables = {
+      "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.main.connection_string
+    }
+
+    # Montar el archivo de configuración desde Azure File Share
+    volume {
+      name                 = "otel-config"
+      mount_path           = "/etc/otelcol-contrib"
+      read_only            = true
+      storage_account_name = azurerm_storage_account.storage.name
+      storage_account_key  = azurerm_storage_account.storage.primary_access_key
+      share_name           = azurerm_storage_share.otel_config[0].name
+    }
+
+    # Comando para usar la configuración montada
+    commands = [
+      "/otelcol-contrib",
+      "--config=/etc/otelcol-contrib/otel-collector-config.yaml"
+    ]
+  }
+
+  ip_address_type = "Private"
+  subnet_ids      = [azurerm_subnet.subnet_containers.id]
+
+  tags = {
+    Environment = "Production"
+    ManagedBy   = "Terraform"
+  }
+
+  # Asegurar que el archivo de config esté subido antes de crear el container
+  depends_on = [
+    azurerm_storage_share_file.otel_config_yaml
+  ]
+}
+
       "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.main.connection_string
     }
 
