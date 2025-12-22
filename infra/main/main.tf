@@ -449,7 +449,7 @@ resource "azurerm_storage_share" "otel_config" {
   count                = var.enable_otel == "true" ? 1 : 0
   name                 = "otel-config"
   storage_account_name = azurerm_storage_account.main.name
-
+}
 # ============================================================
 # OTEL COLLECTOR - FILE SHARE Y CONFIGURACIÓN
 # ============================================================
