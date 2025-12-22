@@ -449,11 +449,11 @@ resource "azurerm_storage_share" "otel_config" {
   count                = var.enable_otel == "true" ? 1 : 0
   name                 = "otel-config"
   storage_account_name = azurerm_storage_account.main.name
+
 # ============================================================
 # OTEL COLLECTOR - FILE SHARE Y CONFIGURACIÓN
 # ============================================================
 
-# File Share para la configuración del OTel Collector
 resource "azurerm_storage_share" "otel_config" {
   count                = var.enable_otel == "true" ? 1 : 0
   name                 = "otel-config"
@@ -461,7 +461,6 @@ resource "azurerm_storage_share" "otel_config" {
   quota                = 1
 }
 
-# Subir el archivo de configuración al File Share
 resource "azurerm_storage_share_file" "otel_config_yaml" {
   count            = var.enable_otel == "true" ? 1 : 0
   name             = "otel-collector-config.yaml"
@@ -486,19 +485,16 @@ resource "azurerm_container_group" "otel_collector" {
     cpu    = "1"
     memory = "2"
 
-    # OTLP gRPC
     ports {
       port     = 4317
       protocol = "TCP"
     }
 
-    # OTLP HTTP
     ports {
       port     = 4318
       protocol = "TCP"
     }
 
-    # Health check / Metrics
     ports {
       port     = 8200
       protocol = "TCP"
@@ -508,7 +504,6 @@ resource "azurerm_container_group" "otel_collector" {
       "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.main.connection_string
     }
 
-    # Montar el archivo de configuración desde Azure File Share
     volume {
       name                 = "otel-config"
       mount_path           = "/etc/otelcol-contrib"
@@ -518,7 +513,6 @@ resource "azurerm_container_group" "otel_collector" {
       share_name           = azurerm_storage_share.otel_config[0].name
     }
 
-    # Comando para usar la configuración montada
     commands = [
       "/otelcol-contrib",
       "--config=/etc/otelcol-contrib/otel-collector-config.yaml"
@@ -533,7 +527,6 @@ resource "azurerm_container_group" "otel_collector" {
     ManagedBy   = "Terraform"
   }
 
-  # Asegurar que el archivo de config esté subido antes de crear el container
   depends_on = [
     azurerm_storage_share_file.otel_config_yaml
   ]
