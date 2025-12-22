@@ -1,7 +1,7 @@
-name: Deploy Backend_v2_multimodulo (Spring Boot App)
+name: Deploy Backend (Spring Boot Multimodulo)
 
 on:
-  workflow_dispatch:  # se ejecuta manualmente desde Actions
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -33,7 +33,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: jgonzaloDev/multimodulo-monolito
-          ref: main  # o develop, según tu rama
+          ref: main
           token: ${{ secrets.GH_PERSONAL_TOKEN }}
           path: backend
 
@@ -57,25 +57,48 @@ jobs:
           mvn clean package -DskipTests
           
           echo "✅ Build completado"
-          ls -lh target/*.jar || echo "⚠️  No se encontraron JARs"
+          echo "📦 Listando JARs generados:"
+          find . -name "*.jar" -type f
 
       # =============================
-      # 5️⃣ Identificar el JAR principal
+      # 5️⃣ Identificar el JAR principal (multimodulo)
       # =============================
       - name: Identify Main JAR
         id: jar
         working-directory: ./backend
         run: |
-          # Buscar el JAR principal (excluyendo 'original')
-          MAIN_JAR=$(find target -name "*.jar" ! -name "*-original.jar" | head -n 1)
+          echo "🔍 Buscando JAR ejecutable en proyecto multimodulo..."
+          
+          # Buscar JAR ejecutable (excluye 'original' y busca en todos los módulos)
+          MAIN_JAR=$(find . -path "*/target/*.jar" \
+            ! -name "*-original.jar" \
+            ! -name "*-sources.jar" \
+            ! -name "*-javadoc.jar" \
+            -type f \
+            -exec sh -c 'jar -tf {} | grep -q "org/springframework/boot/loader/JarLauncher" && echo {}' \; \
+            | head -n 1)
+          
+          # Si no encuentra con JarLauncher, buscar el JAR más grande (probable ejecutable)
+          if [ -z "$MAIN_JAR" ]; then
+            echo "⚠️  No se encontró JAR con JarLauncher, buscando JAR más grande..."
+            MAIN_JAR=$(find . -path "*/target/*.jar" \
+              ! -name "*-original.jar" \
+              ! -name "*-sources.jar" \
+              ! -name "*-javadoc.jar" \
+              -type f \
+              -exec ls -lh {} \; | sort -k5 -hr | head -n 1 | awk '{print $9}')
+          fi
           
           if [ -z "$MAIN_JAR" ]; then
-            echo "❌ No se encontró ningún JAR compilado"
+            echo "❌ No se encontró ningún JAR ejecutable"
+            echo "📦 JARs disponibles:"
+            find . -name "*.jar" -type f
             exit 1
           fi
           
           echo "JAR_FILE=$MAIN_JAR" >> $GITHUB_OUTPUT
-          echo "✅ JAR identificado: $MAIN_JAR"
+          echo "✅ JAR ejecutable identificado: $MAIN_JAR"
+          ls -lh "$MAIN_JAR"
 
       # =============================
       # 6️⃣ Desplegar en Azure App Service
@@ -102,7 +125,7 @@ jobs:
           echo "⏳ Esperando 30 segundos para que la app inicie..."
           sleep 30
           
-          # Verificar health endpoint (opcional)
+          # Verificar health endpoint
           if curl -f -s "$APP_URL/actuator/health" > /dev/null 2>&1; then
             echo "✅ Backend desplegado exitosamente y respondiendo"
           else
