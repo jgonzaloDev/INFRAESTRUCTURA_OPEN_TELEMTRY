@@ -495,17 +495,6 @@ resource "azurerm_container_group" "otel_collector" {
 }
 
 # =================================================================================
-# Public IP para Application Gateway
-# ================================================================================
-resource "azurerm_public_ip" "appgw_ip" {
-  name                = "appgw-public-ip"
-  location            = var.location
-  resource_group_name = azurerm_resource_group.rg.name
-  allocation_method   = "Static"
-  sku                 = "Standard"
-}
-
-# =================================================================================
 # Private Endpoints
 # ================================================================================
 
