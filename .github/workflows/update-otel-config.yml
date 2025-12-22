@@ -1,0 +1,73 @@
+name: Update OTel Collector Configuration
+
+on:
+  push:
+    paths:
+      - 'infra/main/otel-collector-config.yaml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  update-config:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Upload Config to Azure File Share
+        run: |
+          echo "📤 Subiendo configuración..."
+          
+          az storage file upload \
+            --account-name ${{ secrets.TF_VAR_storage_account_name }} \
+            --share-name otel-config \
+            --source ./infra/main/otel-collector-config.yaml \
+            --path otel-collector-config.yaml \
+            --account-key $(az storage account keys list \
+              --account-name ${{ secrets.TF_VAR_storage_account_name }} \
+              --resource-group ${{ secrets.TF_VAR_resource_group_name }} \
+              --query "[0].value" -o tsv) \
+            --overwrite
+          
+          echo "✅ Config subida"
+
+      - name: Restart OTel Collector
+        run: |
+          echo "🔄 Reiniciando..."
+          
+          az container restart \
+            --resource-group ${{ secrets.TF_VAR_resource_group_name }} \
+            --name otel-collector-container
+          
+          echo "✅ Reiniciado"
+
+      - name: Verify Status
+        run: |
+          sleep 10
+          
+          STATUS=$(az container show \
+            --resource-group ${{ secrets.TF_VAR_resource_group_name }} \
+            --name otel-collector-container \
+            --query "instanceView.state" -o tsv)
+          
+          echo "Estado: $STATUS"
+
+      - name: Summary
+        run: |
+          echo "## ✅ OTel Config Updated!" >> $GITHUB_STEP_SUMMARY
+          echo "**Updated:** $(date)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Azure Logout
+        if: always()
+        run: az logout || true
