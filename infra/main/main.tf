@@ -157,6 +157,15 @@ resource "azurerm_linux_web_app" "backend" {
     "OTEL_SERVICE_NAME"           = "spring-boot-backend"
     "OTEL_TRACES_EXPORTER"        = "otlp"
     "OTEL_METRICS_EXPORTER"       = "otlp"
+    "OTEL_LOGS_EXPORTER"          =  "otlp"
+    "OTEL_EXPORTER_OTLP_PROTOCOL" =  "http/protobuf"
+
+   #####################################
+    # 🧩 JPA / Hibernate
+    #####################################
+    "SPRING_JPA_HIBERNATE_DDL_AUTO"           = "create-drop"
+    "SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT" = "org.hibernate.dialect.SQLServerDialect"
+    "SPRING_JPA_SHOW_SQL"                     = "false"
     
     # Application Insights
     "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.main.connection_string
