@@ -41,10 +41,8 @@ jobs:
             -backend-config="key=main.tfstate"
 
       # ============================================================
-      # FASE 1: Crear solo Resource Group + Storage + ACR
-      # (el Storage necesita existir antes para el container tfstate)
+      # FASE 1: Crear Resource Group + Storage + ACR
       # ============================================================
-
       - name: "FASE 1: Terraform Apply — Resource Group + Storage + ACR"
         working-directory: infra/main
         run: |
@@ -84,7 +82,6 @@ jobs:
       # ============================================================
       # FASE 2: Build y Push imagen OTel al ACR
       # ============================================================
-
       - name: Capturar outputs ACR
         working-directory: infra/main
         run: |
@@ -111,9 +108,57 @@ jobs:
           echo "✅ Imagen pushed correctamente"
 
       # ============================================================
+      # FASE 2.5: Importar recursos existentes al state
+      # Evita el error "already exists" en re-deployments
+      # ============================================================
+      - name: "FASE 2.5: Importar recursos existentes al state"
+        working-directory: infra/main
+        run: |
+          echo "📥 Importando recursos existentes al state de Terraform..."
+
+          KV_BASE="https://${{ secrets.TF_VAR_KEY_VAULT_NAME }}.vault.azure.net/secrets"
+
+          terraform import \
+            azurerm_key_vault_secret.db_database \
+            "${KV_BASE}/db-database" 2>/dev/null || echo "⏭️ db-database: no existe aún o ya está en state"
+
+          terraform import \
+            azurerm_key_vault_secret.db_username \
+            "${KV_BASE}/db-username" 2>/dev/null || echo "⏭️ db-username: no existe aún o ya está en state"
+
+          terraform import \
+            azurerm_key_vault_secret.db_password \
+            "${KV_BASE}/db-password" 2>/dev/null || echo "⏭️ db-password: no existe aún o ya está en state"
+
+          echo "✅ Importación completada"
+        env:
+          TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          TF_VAR_location: ${{ secrets.TF_VAR_LOCATION }}
+          TF_VAR_resource_group_name: ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }}
+          TF_VAR_vnet_name: ${{ secrets.TF_VAR_VNET_NAME }}
+          TF_VAR_sql_server_name: ${{ secrets.TF_VAR_SQL_SERVER_NAME }}
+          TF_VAR_database_name: ${{ secrets.TF_VAR_DATABASE_NAME }}
+          TF_VAR_sql_admin_login: ${{ secrets.TF_VAR_SQL_ADMIN_LOGIN }}
+          TF_VAR_sql_admin_password: ${{ secrets.TF_VAR_SQL_ADMIN_PASSWORD }}
+          TF_VAR_app_service_plan_name: ${{ secrets.TF_VAR_APP_SERVICE_PLAN_NAME }}
+          TF_VAR_app_service_plan_name_web: ${{ secrets.TF_VAR_APP_SERVICE_PLAN_NAME_WEB }}
+          TF_VAR_app_service_name: ${{ secrets.TF_VAR_APP_SERVICE_NAME }}
+          TF_VAR_app_service_name_web: ${{ secrets.TF_VAR_APP_SERVICE_NAME_WEB }}
+          TF_VAR_key_vault_name: ${{ secrets.TF_VAR_KEY_VAULT_NAME }}
+          TF_VAR_admin_user_object_id: ${{ secrets.TF_VAR_ADMIN_USER_OBJECT_ID }}
+          TF_VAR_github_principal_id: ${{ secrets.TF_VAR_GITHUB_PRINCIPAL_ID }}
+          TF_VAR_azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          TF_VAR_storage_account_name: ${{ secrets.TF_VAR_STORAGE_ACCOUNT_NAME }}
+          TF_VAR_cert_data: ${{ secrets.TF_VAR_CERT_DATA }}
+          TF_VAR_cert_password: ${{ secrets.TF_VAR_CERT_PASSWORD }}
+          TF_VAR_enable_elastic: ${{ secrets.TF_VAR_ENABLE_ELASTIC }}
+          TF_VAR_enable_otel: ${{ secrets.TF_VAR_ENABLE_OTEL }}
+          TF_VAR_acr_name: ${{ secrets.TF_VAR_ACR_NAME }}
+
+      # ============================================================
       # FASE 3: Apply completo — la imagen ya existe en ACR
       # ============================================================
-
       - name: "FASE 3: Terraform Apply — infraestructura completa"
         working-directory: infra/main
         run: |
