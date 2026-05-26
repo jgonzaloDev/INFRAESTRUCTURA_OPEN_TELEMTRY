@@ -1,11 +1,7 @@
-name: Deploy Backend  (Spring Boot Multimodulo 2026)
+name: Deploy Backend (Spring Boot Multimodulo 2026)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - develop
 
 permissions:
   id-token: write
@@ -32,7 +28,7 @@ jobs:
       - name: Clonar backend (Spring Boot)
         uses: actions/checkout@v4
         with:
-          repository: jgonzaloDev/MULTIMODULO-MONOLITO-2026
+          repository: jgonzaloDev/BACKEND_23-04-2026
           ref: main
           token: ${{ secrets.GH_PERSONAL_TOKEN }}
           path: backend
@@ -55,10 +51,7 @@ jobs:
         run: |
           echo "🔨 Compilando proyecto Spring Boot multimodulo..."
           mvn clean package -DskipTests
-          
           echo "✅ Build completado"
-          echo "📦 Listando JARs generados:"
-          find . -name "*.jar" -type f
 
       # =============================
       # 5️⃣ Identificar el JAR principal (multimodulo)
@@ -67,69 +60,104 @@ jobs:
         id: jar
         working-directory: ./backend
         run: |
-          echo "🔍 Buscando JAR ejecutable en proyecto multimodulo..."
-          
+          echo "🔍 Buscando JAR ejecutable..."
+          echo "📦 Listando todos los JARs generados:"
+          find . -path "*/target/*.jar" ! -name "*-original.jar" -type f -exec ls -lh {} \;
+          echo ""
+
+          # Buscar el JAR más grande (que debería ser la aplicación principal)
           MAIN_JAR=$(find . -path "*/target/*.jar" \
             ! -name "*-original.jar" \
             ! -name "*-sources.jar" \
             ! -name "*-javadoc.jar" \
-            -type f \
-            -exec sh -c 'jar -tf {} | grep -q "org/springframework/boot/loader/JarLauncher" && echo {}' \; \
-            | head -n 1)
-          
-          if [ -z "$MAIN_JAR" ]; then
-            echo "⚠️  No se encontró JAR con JarLauncher, buscando JAR más grande..."
-            MAIN_JAR=$(find . -path "*/target/*.jar" \
-              ! -name "*-original.jar" \
-              ! -name "*-sources.jar" \
-              ! -name "*-javadoc.jar" \
-              -type f \
-              -exec ls -lh {} \; | sort -k5 -hr | head -n 1 | awk '{print $9}')
-          fi
-          
+            -type f -exec ls -s {} \; | sort -rn | head -n 1 | awk '{print $2}')
+
           if [ -z "$MAIN_JAR" ]; then
             echo "❌ No se encontró ningún JAR ejecutable"
-            echo "📦 JARs disponibles:"
-            find . -name "*.jar" -type f
             exit 1
           fi
-          
-          echo "JAR_FILE=$MAIN_JAR" >> $GITHUB_OUTPUT
+
+          # Verificar tamaño
+          SIZE=$(stat -c%s "$MAIN_JAR" 2>/dev/null || stat -f%z "$MAIN_JAR")
+          SIZE_MB=$((SIZE / 1024 / 1024))
+
           echo "✅ JAR ejecutable identificado: $MAIN_JAR"
+          echo "📏 Tamaño: ${SIZE_MB}MB"
           ls -lh "$MAIN_JAR"
 
+          if [ "$SIZE_MB" -lt 5 ]; then
+            echo "⚠️  ADVERTENCIA: El JAR parece pequeño (${SIZE_MB}MB)"
+            echo "Asegúrate de que sea el JAR correcto"
+          fi
+
+          echo "JAR_FILE=$MAIN_JAR" >> $GITHUB_OUTPUT
+
       # =============================
-      # 6️⃣ Desplegar en Azure App Service
+      # 6️⃣ Preparar paquete de deployment
       # =============================
-      - name: Deploy Spring Boot to Azure App Service
+      - name: Prepare deployment package
+        working-directory: ./backend
+        run: |
+          echo "📦 Preparando paquete de deployment..."
+
+          mkdir -p deploy/otel
+
+          echo "📦 Copiando JAR principal..."
+          cp ${{ steps.jar.outputs.JAR_FILE }} deploy/app.jar
+          echo "✅ JAR principal copiado:"
+          ls -lh deploy/app.jar
+
+          echo "📦 Copiando agente OpenTelemetry desde el repo..."
+          if [ -f "app/opentelemetry-javaagent.jar" ]; then
+            cp app/opentelemetry-javaagent.jar deploy/otel/opentelemetry-javaagent.jar
+            echo "✅ Agente OpenTelemetry copiado:"
+            ls -lh deploy/otel/opentelemetry-javaagent.jar
+          else
+            echo "❌ ERROR: No se encontró app/opentelemetry-javaagent.jar"
+            echo "📂 Contenido del directorio app/:"
+            ls -la app/ || echo "El directorio app/ no existe"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ Estructura final del paquete:"
+          echo "================================"
+          ls -lh deploy/
+          echo ""
+          ls -lh deploy/otel/
+          echo "================================"
+
+      # =============================
+      # 7️⃣ Desplegar en Azure App Service
+      # =============================
+      - name: Deploy to Azure App Service
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ secrets.TF_VAR_APP_SERVICE_NAME }}
-          package: ./backend/${{ steps.jar.outputs.JAR_FILE }}
+          package: ./backend/deploy
 
       # =============================
-      # 7️⃣ Verificar deployment
+      # 8️⃣ Verificar deployment
       # =============================
       - name: Verify Deployment
         run: |
           echo "🔍 Verificando deployment..."
-          
           APP_URL="https://${{ secrets.TF_VAR_APP_SERVICE_NAME }}.azurewebsites.net"
-          
-          echo "📍 URL de la aplicación: $APP_URL"
-          echo "🏥 Health check: $APP_URL/actuator/health"
-          
-          echo "⏳ Esperando 30 segundos para que la app inicie..."
-          sleep 30
-          
-          if curl -f -s "$APP_URL/actuator/health" > /dev/null 2>&1; then
+          echo "📍 URL: $APP_URL"
+
+          echo "⏳ Esperando 60 segundos para que la app inicie..."
+          sleep 60
+
+          echo "🧪 Probando endpoint /customer..."
+          if curl -f -s "$APP_URL/customer" > /dev/null 2>&1; then
             echo "✅ Backend desplegado exitosamente y respondiendo"
           else
-            echo "⚠️  Backend desplegado pero health check falló (puede tardar unos minutos en estar listo)"
+            echo "⚠️ Backend desplegado pero puede tardar en iniciar"
+            echo "🔗 Verifica manualmente: $APP_URL/customer"
           fi
 
       # =============================
-      # 8️⃣ Logout de Azure
+      # 9️⃣ Logout de Azure
       # =============================
       - name: Azure Logout
         if: always()

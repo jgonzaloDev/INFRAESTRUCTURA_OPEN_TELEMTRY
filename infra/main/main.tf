@@ -219,31 +219,8 @@ resource "azurerm_storage_share" "elasticsearch" {
   ]
 }
 
-# 3.4 - STORAGE SHARE: OpenTelemetry Config (condicional)
-# ============================================================
-resource "azurerm_storage_share" "otel_config" {
-  count                = var.enable_otel == "true" ? 1 : 0
-  name                 = "otel-config"
-  storage_account_name = azurerm_storage_account.storage.name
-  quota                = 1
-
-  depends_on = [
-    azurerm_storage_account.storage
-  ]
-}
-
-# 3.5 - STORAGE FILE: OpenTelemetry Config YAML (condicional)
-# ============================================================
-resource "azurerm_storage_share_file" "otel_config_yaml" {
-  count            = var.enable_otel == "true" ? 1 : 0
-  name             = "otel-collector-config.yaml"
-  storage_share_id = azurerm_storage_share.otel_config[0].id
-  source           = "${path.module}/otel-collector-config.yaml"
-
-  depends_on = [
-    azurerm_storage_share.otel_config
-  ]
-}
+# ❌ ELIMINADO: azurerm_storage_share.otel_config      → reemplazado por ACR
+# ❌ ELIMINADO: azurerm_storage_share_file.otel_config_yaml → reemplazado por ACR
 
 # ============================================================
 # FASE 4: BASES DE DATOS - SQL Server y Database
@@ -272,7 +249,7 @@ resource "azurerm_mssql_database" "database" {
   server_id = azurerm_mssql_server.sql_server.id
   sku_name  = "Basic"
   collation = "SQL_Latin1_General_CP1_CI_AS"
-  
+
   tags = {
     Environment = "Production"
     ManagedBy   = "Terraform"
@@ -333,7 +310,7 @@ resource "azurerm_role_assignment" "user_kv_admin" {
 # ============================================================
 resource "time_sleep" "wait_for_iam" {
   create_duration = "45s"
-  
+
   depends_on = [
     azurerm_role_assignment.github_kv_secrets,
     azurerm_role_assignment.user_kv_admin
@@ -346,9 +323,9 @@ resource "azurerm_key_vault_secret" "db_database" {
   name         = "db-database"
   value        = var.database_name
   key_vault_id = azurerm_key_vault.kv.id
-  
-  lifecycle { 
-    ignore_changes = [value] 
+
+  lifecycle {
+    ignore_changes = [value]
   }
 
   depends_on = [
@@ -362,9 +339,9 @@ resource "azurerm_key_vault_secret" "db_username" {
   name         = "db-username"
   value        = var.sql_admin_login
   key_vault_id = azurerm_key_vault.kv.id
-  
-  lifecycle { 
-    ignore_changes = [value] 
+
+  lifecycle {
+    ignore_changes = [value]
   }
 
   depends_on = [
@@ -378,13 +355,37 @@ resource "azurerm_key_vault_secret" "db_password" {
   name         = "db-password"
   value        = var.sql_admin_password
   key_vault_id = azurerm_key_vault.kv.id
-  
-  lifecycle { 
-    ignore_changes = [value] 
+
+  lifecycle {
+    ignore_changes = [value]
   }
 
   depends_on = [
     time_sleep.wait_for_iam
+  ]
+}
+
+# ============================================================
+# FASE 5.5: AZURE CONTAINER REGISTRY (ACR)
+# ============================================================
+
+# 5.8 - AZURE CONTAINER REGISTRY
+# ============================================================
+resource "azurerm_container_registry" "acr" {
+  name                = var.acr_name
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = var.location
+  sku                 = "Basic"
+  admin_enabled       = true
+
+  tags = {
+    Environment = "Production"
+    ManagedBy   = "Terraform"
+    Purpose     = "OTel Collector Custom Image"
+  }
+
+  depends_on = [
+    azurerm_resource_group.rg
   ]
 }
 
@@ -421,9 +422,7 @@ resource "azurerm_container_group" "elasticsearch" {
     environment_variables = {
       "discovery.type"           = "single-node"
       "xpack.security.enabled"   = "false"
-      "ES_JAVA_OPTS"            = "-Xms2g -Xmx2g"
-      
-      # Índices para OpenTelemetry
+      "ES_JAVA_OPTS"             = "-Xms2g -Xmx2g"
       "action.auto_create_index" = "otel-logs-*,otel-traces-*,otel-metrics-*"
     }
 
@@ -473,12 +472,12 @@ resource "azurerm_container_group" "kibana" {
     }
 
     environment_variables = {
-      "ELASTICSEARCH_HOSTS"     = "http://${azurerm_container_group.elasticsearch[0].ip_address}:9200"
-      "SERVER_NAME"             = "kibana"
-      "SERVER_HOST"             = "0.0.0.0"
-      "ELASTICSEARCH_USERNAME"  = ""
-      "ELASTICSEARCH_PASSWORD"  = ""
-      "XPACK_SECURITY_ENABLED"  = "false"
+      "ELASTICSEARCH_HOSTS"    = "http://${azurerm_container_group.elasticsearch[0].ip_address}:9200"
+      "SERVER_NAME"            = "kibana"
+      "SERVER_HOST"            = "0.0.0.0"
+      "ELASTICSEARCH_USERNAME" = ""
+      "ELASTICSEARCH_PASSWORD" = ""
+      "XPACK_SECURITY_ENABLED" = "false"
     }
   }
 
@@ -497,6 +496,7 @@ resource "azurerm_container_group" "kibana" {
 }
 
 # 6.3 - OPENTELEMETRY COLLECTOR CONTAINER (condicional)
+# ⭐ ACTUALIZADO: Ahora usa imagen custom desde ACR (sin File Share)
 # ============================================================
 resource "azurerm_container_group" "otel_collector" {
   count               = var.enable_otel == "true" ? 1 : 0
@@ -505,10 +505,18 @@ resource "azurerm_container_group" "otel_collector" {
   resource_group_name = azurerm_resource_group.rg.name
   os_type             = "Linux"
 
+  # ⭐ Credenciales para pull desde ACR
+  image_registry_credential {
+    server   = azurerm_container_registry.acr.login_server
+    username = azurerm_container_registry.acr.admin_username
+    password = azurerm_container_registry.acr.admin_password
+  }
+
   container {
-    name   = "otel-collector"
-    image  = "otel/opentelemetry-collector-contrib:latest"
-    cpu    = "1"
+    name  = "otel-collector"
+    # ⭐ Imagen custom desde ACR (config ya embebida dentro)
+    image = "${azurerm_container_registry.acr.login_server}/otel-collector-custom:latest"
+    cpu   = "1"
     memory = "2"
 
     ports {
@@ -521,31 +529,12 @@ resource "azurerm_container_group" "otel_collector" {
       protocol = "TCP"
     }
 
-    ports {
-      port     = 8200
-      protocol = "TCP"
-    }
-
     environment_variables = {
       "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.main.connection_string
-      
-      # IP de Elasticsearch para el exporter
-      "ELASTICSEARCH_HOST" = var.enable_elastic == "true" ? azurerm_container_group.elasticsearch[0].ip_address : ""
+      "ELASTICSEARCH_HOST"                    = var.enable_elastic == "true" ? azurerm_container_group.elasticsearch[0].ip_address : ""
     }
 
-    volume {
-      name                 = "otel-config"
-      mount_path           = "/etc/otelcol-contrib"
-      read_only            = true
-      storage_account_name = azurerm_storage_account.storage.name
-      storage_account_key  = azurerm_storage_account.storage.primary_access_key
-      share_name           = azurerm_storage_share.otel_config[0].name
-    }
-
-    commands = [
-      "/otelcol-contrib",
-      "--config=/etc/otelcol-contrib/otel-collector-config.yaml"
-    ]
+    # ⭐ ELIMINADO: volumen de File Share — config va dentro de la imagen
   }
 
   ip_address_type = "Private"
@@ -554,10 +543,11 @@ resource "azurerm_container_group" "otel_collector" {
   tags = {
     Environment = "Production"
     ManagedBy   = "Terraform"
+    Purpose     = "OTel Collector - ACR Custom Image"
   }
 
   depends_on = [
-    azurerm_storage_share_file.otel_config_yaml,
+    azurerm_container_registry.acr,
     azurerm_application_insights.main,
     azurerm_container_group.elasticsearch
   ]
@@ -609,7 +599,7 @@ resource "azurerm_linux_web_app" "backend" {
 
   site_config {
     always_on = true
-    
+
     application_stack {
       java_server         = "JAVA"
       java_server_version = "17"
@@ -628,35 +618,36 @@ resource "azurerm_linux_web_app" "backend" {
   app_settings = {
     # Spring Boot Configuration
     "SPRING_PROFILES_ACTIVE" = "production"
-    
+
     # Database Configuration (usando Key Vault)
-    "SPRING_DATASOURCE_URL"      = "jdbc:sqlserver://${azurerm_mssql_server.sql_server.fully_qualified_domain_name}:1433;database=@Microsoft.KeyVault(SecretUri=https://${var.key_vault_name}.vault.azure.net/secrets/db-database/);encrypt=true;trustServerCertificate=false;"
-    "SPRING_DATASOURCE_USERNAME" = "@Microsoft.KeyVault(SecretUri=https://${var.key_vault_name}.vault.azure.net/secrets/db-username/)"
-    "SPRING_DATASOURCE_PASSWORD" = "@Microsoft.KeyVault(SecretUri=https://${var.key_vault_name}.vault.azure.net/secrets/db-password/)"
+    "SPRING_DATASOURCE_URL"               = "jdbc:sqlserver://${azurerm_mssql_server.sql_server.fully_qualified_domain_name}:1433;database=@Microsoft.KeyVault(SecretUri=https://${var.key_vault_name}.vault.azure.net/secrets/db-database/);encrypt=true;trustServerCertificate=false;"
+    "SPRING_DATASOURCE_USERNAME"          = "@Microsoft.KeyVault(SecretUri=https://${var.key_vault_name}.vault.azure.net/secrets/db-username/)"
+    "SPRING_DATASOURCE_PASSWORD"          = "@Microsoft.KeyVault(SecretUri=https://${var.key_vault_name}.vault.azure.net/secrets/db-password/)"
     "SPRING_DATASOURCE_DRIVER_CLASS_NAME" = "com.microsoft.sqlserver.jdbc.SQLServerDriver"
-    
+
     # JPA/Hibernate Configuration
-    "SPRING_JPA_HIBERNATE_DDL_AUTO" = "create-drop"
-    "SPRING_JPA_SHOW_SQL"           = "false"
+    "SPRING_JPA_HIBERNATE_DDL_AUTO"           = "create-drop"
+    "SPRING_JPA_SHOW_SQL"                     = "false"
     "SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT" = "org.hibernate.dialect.SQLServerDialect"
-    
+
     # Elasticsearch Configuration
     "ELASTICSEARCH_ENABLED" = var.enable_elastic
     "ELASTICSEARCH_HOST"    = var.enable_elastic == "true" ? azurerm_container_group.elasticsearch[0].ip_address : ""
     "ELASTICSEARCH_PORT"    = "9200"
-    
-    # OpenTelemetry Configuration
-    "OTEL_EXPORTER_OTLP_ENDPOINT" = var.enable_otel == "true" ? "http://${azurerm_container_group.otel_collector[0].ip_address}:4318" : ""
-    "OTEL_SERVICE_NAME"           = "spring-boot-backend"
-    "OTEL_TRACES_EXPORTER"        = "otlp"
-    "OTEL_METRICS_EXPORTER"       = "otlp"
-    "OTEL_LOGS_EXPORTER"          = "otlp"
-    "OTEL_EXPORTER_OTLP_PROTOCOL" = "http/protobuf"
-    
+
+    # ⭐ OpenTelemetry Configuration
+    "JAVA_TOOL_OPTIONS"               = "-javaagent:/home/site/wwwroot/otel/opentelemetry-javaagent.jar"
+    "OTEL_SERVICE_NAME"               = "spring-boot-backend"
+    "OTEL_EXPORTER_OTLP_ENDPOINT"     = var.enable_otel == "true" ? "http://${azurerm_container_group.otel_collector[0].ip_address}:4318" : ""
+    "OTEL_EXPORTER_OTLP_PROTOCOL"     = "http/protobuf"
+    "OTEL_TRACES_EXPORTER"            = "otlp"
+    "OTEL_METRICS_EXPORTER"           = "otlp"
+    "OTEL_LOGS_EXPORTER"              = "otlp"
+
     # Application Insights
-    "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.main.connection_string
+    "APPLICATIONINSIGHTS_CONNECTION_STRING"      = azurerm_application_insights.main.connection_string
     "ApplicationInsightsAgent_EXTENSION_VERSION" = "~3"
-    
+
     # Server Configuration
     "SERVER_PORT" = "8080"
   }
@@ -686,7 +677,7 @@ resource "azurerm_linux_web_app" "frontend" {
 
   site_config {
     always_on = false
-    
+
     application_stack {
       node_version = "20-lts"
     }
@@ -695,7 +686,7 @@ resource "azurerm_linux_web_app" "frontend" {
   app_settings = {
     "REACT_APP_API_URL"     = "https://${var.app_service_name}.azurewebsites.net"
     "REACT_APP_ENVIRONMENT" = "production"
-    
+
     "SCM_DO_BUILD_DURING_DEPLOYMENT" = "true"
     "WEBSITE_NODE_DEFAULT_VERSION"   = "20-lts"
   }
@@ -873,6 +864,16 @@ output "application_insights_key" {
   description = "Instrumentation Key de Application Insights"
   value       = azurerm_application_insights.main.instrumentation_key
   sensitive   = true
+}
+
+output "acr_login_server" {
+  description = "Login server del Azure Container Registry"
+  value       = azurerm_container_registry.acr.login_server
+}
+
+output "acr_name" {
+  description = "Nombre del Azure Container Registry"
+  value       = azurerm_container_registry.acr.name
 }
 
 output "elasticsearch_ip" {

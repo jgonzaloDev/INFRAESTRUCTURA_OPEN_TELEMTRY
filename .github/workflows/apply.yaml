@@ -27,6 +27,8 @@ jobs:
       # 3️⃣ Instalar Terraform
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
 
       # 4️⃣ Terraform Init (carpeta infra/main)
       - name: Terraform Init
@@ -76,6 +78,91 @@ jobs:
 
           # 🔍 Elasticsearch (opcional)
           TF_VAR_enable_elastic: ${{ secrets.TF_VAR_ENABLE_ELASTIC }}
-          
-          # 📊 OpenTelemetry (opcional)
+
+          # 📊 OpenTelemetry
           TF_VAR_enable_otel: ${{ secrets.TF_VAR_ENABLE_OTEL }}
+
+          # 🐳 Azure Container Registry
+          TF_VAR_acr_name: ${{ secrets.TF_VAR_ACR_NAME }}
+
+      # 6️⃣ Capturar outputs del ACR desde Terraform
+      - name: Capturar outputs ACR
+        working-directory: infra/main
+        run: |
+          echo "📤 Leyendo outputs de Terraform..."
+          ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
+          ACR_NAME=$(terraform output -raw acr_name)
+          echo "ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER" >> $GITHUB_ENV
+          echo "ACR_NAME=$ACR_NAME" >> $GITHUB_ENV
+          echo "✅ ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER"
+          echo "✅ ACR_NAME=$ACR_NAME"
+
+      # 7️⃣ Login al ACR
+      - name: Login to ACR
+        run: |
+          echo "🔐 Login al Container Registry..."
+          az acr login --name ${{ env.ACR_NAME }}
+          echo "✅ Login OK"
+
+      # 8️⃣ Build y Push imagen custom del OTel Collector
+      - name: Build & Push imagen OTel Collector
+        run: |
+          echo "🐳 Building imagen custom OTel Collector..."
+
+          docker build \
+            -t ${{ env.ACR_LOGIN_SERVER }}/otel-collector-custom:latest \
+            -t ${{ env.ACR_LOGIN_SERVER }}/otel-collector-custom:${{ github.sha }} \
+            ./infra/main/
+
+          docker push ${{ env.ACR_LOGIN_SERVER }}/otel-collector-custom:latest
+          docker push ${{ env.ACR_LOGIN_SERVER }}/otel-collector-custom:${{ github.sha }}
+
+          echo "✅ Imagen pushed correctamente"
+
+      # 9️⃣ Restart del Container Instance para usar la nueva imagen
+      - name: Restart OTel Collector Container
+        run: |
+          echo "🔄 Reiniciando OTel Collector..."
+
+          az container restart \
+            --resource-group ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }} \
+            --name otel-collector-container
+
+          echo "✅ Container reiniciado"
+
+      # 🔟 Verificar que el container quedó Running
+      - name: Verify OTel Collector Status
+        run: |
+          sleep 15
+
+          STATUS=$(az container show \
+            --resource-group ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }} \
+            --name otel-collector-container \
+            --query "instanceView.state" -o tsv)
+
+          echo "Estado del container: $STATUS"
+
+          if [ "$STATUS" != "Running" ]; then
+            echo "❌ OTel Collector no está Running — revisar logs"
+            az container logs \
+              --resource-group ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }} \
+              --name otel-collector-container
+            exit 1
+          fi
+
+          echo "✅ OTel Collector Running correctamente"
+
+      # 1️⃣1️⃣ Resumen final
+      - name: Summary
+        run: |
+          echo "## ✅ Infraestructura desplegada!" >> $GITHUB_STEP_SUMMARY
+          echo "| Recurso | Valor |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| ACR | ${{ env.ACR_LOGIN_SERVER }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| OTel Image | ${{ env.ACR_LOGIN_SERVER }}/otel-collector-custom:${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deployed at | $(date) |" >> $GITHUB_STEP_SUMMARY
+
+      # 1️⃣2️⃣ Azure Logout
+      - name: Azure Logout
+        if: always()
+        run: az logout || true

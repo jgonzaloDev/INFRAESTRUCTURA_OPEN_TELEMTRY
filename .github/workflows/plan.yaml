@@ -86,6 +86,9 @@ jobs:
 
           # Elasticsearch (opcional)
           TF_VAR_enable_elastic: ${{ secrets.TF_VAR_ENABLE_ELASTIC }}
-          
-          # OpenTelemetry (opcional)
+
+          # OpenTelemetry
           TF_VAR_enable_otel: ${{ secrets.TF_VAR_ENABLE_OTEL }}
+
+          # 🐳 Azure Container Registry
+          TF_VAR_acr_name: ${{ secrets.TF_VAR_ACR_NAME }}

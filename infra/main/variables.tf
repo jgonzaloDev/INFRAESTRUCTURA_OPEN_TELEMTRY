@@ -127,6 +127,20 @@ variable "enable_otel" {
 }
 
 # ============================================================
+# AZURE CONTAINER REGISTRY (ACR)
+# ============================================================
+
+variable "acr_name" {
+  description = "Nombre del Azure Container Registry (solo minúsculas y números, sin guiones, 5-50 caracteres)"
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-z0-9]{5,50}$", var.acr_name))
+    error_message = "El nombre del ACR debe contener solo letras minúsculas y números, entre 5 y 50 caracteres."
+  }
+}
+
+# ============================================================
 # ID de la identidad federada (OIDC) de GitHub Actions
 # ============================================================
 
