@@ -1,0 +1,94 @@
+name: 🧹 Destroy All — Limpiar infraestructura completa
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Escribe "DESTROY" para confirmar'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Validar confirmación
+      - name: Validar confirmación
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "DESTROY" ]; then
+            echo "❌ Confirmación incorrecta. Debes escribir 'DESTROY' exacto"
+            exit 1
+          fi
+          echo "✅ Confirmación recibida"
+
+      # 2️⃣ Login en Azure usando OIDC
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # 3️⃣ Eliminar el Resource Group completo
+      - name: Eliminar Resource Group
+        run: |
+          echo "🗑️ Eliminando Resource Group ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }}..."
+          az group delete \
+            --name ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }} \
+            --yes \
+            --no-wait || echo "⏭️ El Resource Group no existe o ya fue eliminado"
+
+          echo "⏳ Esperando a que termine la eliminación..."
+          az group wait \
+            --name ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }} \
+            --deleted \
+            --timeout 1800 || echo "⏭️ Timeout o ya eliminado"
+
+          echo "✅ Resource Group eliminado"
+
+      # 4️⃣ Purgar Key Vault soft-deleted
+      - name: Purgar Key Vault
+        run: |
+          echo "🔥 Purgando Key Vault ${{ secrets.TF_VAR_KEY_VAULT_NAME }}..."
+          az keyvault purge \
+            --name ${{ secrets.TF_VAR_KEY_VAULT_NAME }} \
+            --location ${{ secrets.TF_VAR_LOCATION }} 2>/dev/null \
+            || echo "⏭️ Key Vault no estaba en soft-delete o ya fue purgado"
+
+          echo "✅ Purga completada"
+
+      # 5️⃣ Verificar estado final
+      - name: Verificar estado
+        run: |
+          echo "🔍 Verificando que todo está limpio..."
+
+          RG_EXISTS=$(az group exists --name ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }})
+          if [ "$RG_EXISTS" == "true" ]; then
+            echo "⚠️ El Resource Group aún existe (puede estar en proceso de eliminación)"
+          else
+            echo "✅ Resource Group eliminado correctamente"
+          fi
+
+          echo "🔍 Verificando Key Vaults soft-deleted..."
+          az keyvault list-deleted --query "[?name=='${{ secrets.TF_VAR_KEY_VAULT_NAME }}']" -o table || true
+
+      # 6️⃣ Resumen
+      - name: Summary
+        run: |
+          echo "## 🧹 Destrucción completada" >> $GITHUB_STEP_SUMMARY
+          echo "| Recurso | Estado |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource Group | Eliminado |" >> $GITHUB_STEP_SUMMARY
+          echo "| Key Vault | Purgado |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Ahora puedes correr el workflow apply.yaml para desplegar todo limpio.**" >> $GITHUB_STEP_SUMMARY
+
+      # 7️⃣ Logout
+      - name: Azure Logout
+        if: always()
+        run: az logout || true
