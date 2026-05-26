@@ -30,62 +30,50 @@ jobs:
         with:
           terraform_wrapper: false
 
-      # 4️⃣ Terraform Init (carpeta infra/main)
+      # 4️⃣ Terraform Init
       - name: Terraform Init
         working-directory: infra/main
         run: terraform init
 
-      # 5️⃣ Terraform Apply – SOLO main.tf (infra/main)
-      - name: Terraform Apply MAIN
+      # ============================================================
+      # FASE 1: Crear solo el ACR (sin el Container Instance)
+      # ============================================================
+
+      # 5️⃣ Terraform Apply FASE 1 — solo ACR
+      - name: "FASE 1: Terraform Apply — solo ACR"
         working-directory: infra/main
-        run: terraform apply -auto-approve
+        run: |
+          echo "🏗️ Creando Azure Container Registry..."
+          terraform apply -auto-approve \
+            -target=azurerm_resource_group.rg \
+            -target=azurerm_container_registry.acr
+          echo "✅ ACR creado"
         env:
-          # 🔵 Azure principales
           TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           TF_VAR_location: ${{ secrets.TF_VAR_LOCATION }}
           TF_VAR_resource_group_name: ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }}
-
-          # 🌐 Red
           TF_VAR_vnet_name: ${{ secrets.TF_VAR_VNET_NAME }}
-
-          # 🐘 SQL Server
           TF_VAR_sql_server_name: ${{ secrets.TF_VAR_SQL_SERVER_NAME }}
           TF_VAR_database_name: ${{ secrets.TF_VAR_DATABASE_NAME }}
           TF_VAR_sql_admin_login: ${{ secrets.TF_VAR_SQL_ADMIN_LOGIN }}
           TF_VAR_sql_admin_password: ${{ secrets.TF_VAR_SQL_ADMIN_PASSWORD }}
-
-          # 🕸 App Services (backend y frontend)
           TF_VAR_app_service_plan_name: ${{ secrets.TF_VAR_APP_SERVICE_PLAN_NAME }}
           TF_VAR_app_service_plan_name_web: ${{ secrets.TF_VAR_APP_SERVICE_PLAN_NAME_WEB }}
           TF_VAR_app_service_name: ${{ secrets.TF_VAR_APP_SERVICE_NAME }}
           TF_VAR_app_service_name_web: ${{ secrets.TF_VAR_APP_SERVICE_NAME_WEB }}
-
-          # 🔐 Key Vault
           TF_VAR_key_vault_name: ${{ secrets.TF_VAR_KEY_VAULT_NAME }}
           TF_VAR_admin_user_object_id: ${{ secrets.TF_VAR_ADMIN_USER_OBJECT_ID }}
-
-          # 🤝 GitHub OIDC Service Principal
           TF_VAR_github_principal_id: ${{ secrets.TF_VAR_GITHUB_PRINCIPAL_ID }}
           TF_VAR_azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
-
-          # 📦 Storage
           TF_VAR_storage_account_name: ${{ secrets.TF_VAR_STORAGE_ACCOUNT_NAME }}
-
-          # 📜 Certificado (opcional)
           TF_VAR_cert_data: ${{ secrets.TF_VAR_CERT_DATA }}
           TF_VAR_cert_password: ${{ secrets.TF_VAR_CERT_PASSWORD }}
-
-          # 🔍 Elasticsearch (opcional)
           TF_VAR_enable_elastic: ${{ secrets.TF_VAR_ENABLE_ELASTIC }}
-
-          # 📊 OpenTelemetry
           TF_VAR_enable_otel: ${{ secrets.TF_VAR_ENABLE_OTEL }}
-
-          # 🐳 Azure Container Registry
           TF_VAR_acr_name: ${{ secrets.TF_VAR_ACR_NAME }}
 
-      # 6️⃣ Capturar outputs del ACR desde Terraform
+      # 6️⃣ Capturar outputs del ACR
       - name: Capturar outputs ACR
         working-directory: infra/main
         run: |
@@ -97,15 +85,19 @@ jobs:
           echo "✅ ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER"
           echo "✅ ACR_NAME=$ACR_NAME"
 
+      # ============================================================
+      # FASE 2: Build y Push imagen OTel al ACR
+      # ============================================================
+
       # 7️⃣ Login al ACR
-      - name: Login to ACR
+      - name: "FASE 2: Login to ACR"
         run: |
           echo "🔐 Login al Container Registry..."
           az acr login --name ${{ env.ACR_NAME }}
           echo "✅ Login OK"
 
-      # 8️⃣ Build y Push imagen custom del OTel Collector
-      - name: Build & Push imagen OTel Collector
+      # 8️⃣ Build & Push imagen OTel custom
+      - name: "FASE 2: Build & Push imagen OTel Collector"
         run: |
           echo "🐳 Building imagen custom OTel Collector..."
 
@@ -119,22 +111,55 @@ jobs:
 
           echo "✅ Imagen pushed correctamente"
 
-      # 9️⃣ Restart del Container Instance para usar la nueva imagen
+      # ============================================================
+      # FASE 3: Apply completo — ahora la imagen ya existe en ACR
+      # ============================================================
+
+      # 9️⃣ Terraform Apply FASE 3 — infraestructura completa
+      - name: "FASE 3: Terraform Apply — infraestructura completa"
+        working-directory: infra/main
+        run: |
+          echo "🏗️ Desplegando infraestructura completa..."
+          terraform apply -auto-approve
+          echo "✅ Infraestructura completa desplegada"
+        env:
+          TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          TF_VAR_location: ${{ secrets.TF_VAR_LOCATION }}
+          TF_VAR_resource_group_name: ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }}
+          TF_VAR_vnet_name: ${{ secrets.TF_VAR_VNET_NAME }}
+          TF_VAR_sql_server_name: ${{ secrets.TF_VAR_SQL_SERVER_NAME }}
+          TF_VAR_database_name: ${{ secrets.TF_VAR_DATABASE_NAME }}
+          TF_VAR_sql_admin_login: ${{ secrets.TF_VAR_SQL_ADMIN_LOGIN }}
+          TF_VAR_sql_admin_password: ${{ secrets.TF_VAR_SQL_ADMIN_PASSWORD }}
+          TF_VAR_app_service_plan_name: ${{ secrets.TF_VAR_APP_SERVICE_PLAN_NAME }}
+          TF_VAR_app_service_plan_name_web: ${{ secrets.TF_VAR_APP_SERVICE_PLAN_NAME_WEB }}
+          TF_VAR_app_service_name: ${{ secrets.TF_VAR_APP_SERVICE_NAME }}
+          TF_VAR_app_service_name_web: ${{ secrets.TF_VAR_APP_SERVICE_NAME_WEB }}
+          TF_VAR_key_vault_name: ${{ secrets.TF_VAR_KEY_VAULT_NAME }}
+          TF_VAR_admin_user_object_id: ${{ secrets.TF_VAR_ADMIN_USER_OBJECT_ID }}
+          TF_VAR_github_principal_id: ${{ secrets.TF_VAR_GITHUB_PRINCIPAL_ID }}
+          TF_VAR_azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          TF_VAR_storage_account_name: ${{ secrets.TF_VAR_STORAGE_ACCOUNT_NAME }}
+          TF_VAR_cert_data: ${{ secrets.TF_VAR_CERT_DATA }}
+          TF_VAR_cert_password: ${{ secrets.TF_VAR_CERT_PASSWORD }}
+          TF_VAR_enable_elastic: ${{ secrets.TF_VAR_ENABLE_ELASTIC }}
+          TF_VAR_enable_otel: ${{ secrets.TF_VAR_ENABLE_OTEL }}
+          TF_VAR_acr_name: ${{ secrets.TF_VAR_ACR_NAME }}
+
+      # 🔟 Restart del Container Instance
       - name: Restart OTel Collector Container
         run: |
           echo "🔄 Reiniciando OTel Collector..."
-
           az container restart \
             --resource-group ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }} \
             --name otel-collector-container
-
           echo "✅ Container reiniciado"
 
-      # 🔟 Verificar que el container quedó Running
+      # 1️⃣1️⃣ Verificar que el container quedó Running
       - name: Verify OTel Collector Status
         run: |
           sleep 15
-
           STATUS=$(az container show \
             --resource-group ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }} \
             --name otel-collector-container \
@@ -143,7 +168,7 @@ jobs:
           echo "Estado del container: $STATUS"
 
           if [ "$STATUS" != "Running" ]; then
-            echo "❌ OTel Collector no está Running — revisar logs"
+            echo "❌ OTel Collector no está Running — logs:"
             az container logs \
               --resource-group ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }} \
               --name otel-collector-container
@@ -152,7 +177,7 @@ jobs:
 
           echo "✅ OTel Collector Running correctamente"
 
-      # 1️⃣1️⃣ Resumen final
+      # 1️⃣2️⃣ Resumen final
       - name: Summary
         run: |
           echo "## ✅ Infraestructura desplegada!" >> $GITHUB_STEP_SUMMARY
@@ -162,7 +187,7 @@ jobs:
           echo "| OTel Image | ${{ env.ACR_LOGIN_SERVER }}/otel-collector-custom:${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Deployed at | $(date) |" >> $GITHUB_STEP_SUMMARY
 
-      # 1️⃣2️⃣ Azure Logout
+      # 1️⃣3️⃣ Azure Logout
       - name: Azure Logout
         if: always()
         run: az logout || true
