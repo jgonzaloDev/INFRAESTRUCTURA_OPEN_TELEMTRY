@@ -30,30 +30,21 @@ jobs:
         with:
           terraform_wrapper: false
 
-      # 4️⃣ Terraform Init con backend remoto en Azure Storage
+      # 4️⃣ Terraform Init (carpeta infra/main) — sin backend remoto
       - name: Terraform Init
         working-directory: infra/main
-        run: |
-          terraform init \
-            -backend-config="resource_group_name=${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }}" \
-            -backend-config="storage_account_name=${{ secrets.TF_VAR_STORAGE_ACCOUNT_NAME }}" \
-            -backend-config="container_name=tfstate" \
-            -backend-config="key=main.tfstate"
+        run: terraform init
 
       # ============================================================
-      # FASE 1: Crear Resource Group + Storage + ACR
+      # FASE 1: Crear solo el ACR (target específico)
+      # Necesario para hacer el build/push antes del apply completo
       # ============================================================
-      - name: "FASE 1: Terraform Apply — Resource Group + Storage + ACR"
+      - name: "FASE 1: Terraform Apply — solo ACR"
         working-directory: infra/main
         run: |
-          echo "🏗️ Creando Resource Group, Storage Account y ACR..."
           terraform apply -auto-approve \
             -target=azurerm_resource_group.rg \
-            -target=azurerm_storage_account.storage \
-            -target=azurerm_storage_container.tfstate \
-            -target=azurerm_storage_container.uploads \
             -target=azurerm_container_registry.acr
-          echo "✅ Fase 1 completada"
         env:
           TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
@@ -89,82 +80,23 @@ jobs:
           ACR_NAME=$(terraform output -raw acr_name)
           echo "ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER" >> $GITHUB_ENV
           echo "ACR_NAME=$ACR_NAME" >> $GITHUB_ENV
-          echo "✅ ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER"
 
       - name: "FASE 2: Login to ACR"
-        run: |
-          az acr login --name ${{ env.ACR_NAME }}
-          echo "✅ Login ACR OK"
+        run: az acr login --name ${{ env.ACR_NAME }}
 
       - name: "FASE 2: Build & Push imagen OTel Collector"
         run: |
-          echo "🐳 Building imagen custom OTel Collector..."
           docker build \
             -t ${{ env.ACR_LOGIN_SERVER }}/otel-collector-custom:latest \
-            -t ${{ env.ACR_LOGIN_SERVER }}/otel-collector-custom:${{ github.sha }} \
             ./infra/main/
           docker push ${{ env.ACR_LOGIN_SERVER }}/otel-collector-custom:latest
-          docker push ${{ env.ACR_LOGIN_SERVER }}/otel-collector-custom:${{ github.sha }}
-          echo "✅ Imagen pushed correctamente"
-
-      # ============================================================
-      # FASE 2.5: Importar recursos existentes al state
-      # Evita el error "already exists" en re-deployments
-      # ============================================================
-      - name: "FASE 2.5: Importar recursos existentes al state"
-        working-directory: infra/main
-        run: |
-          echo "📥 Importando recursos existentes al state de Terraform..."
-
-          KV_BASE="https://${{ secrets.TF_VAR_KEY_VAULT_NAME }}.vault.azure.net/secrets"
-
-          terraform import \
-            azurerm_key_vault_secret.db_database \
-            "${KV_BASE}/db-database" 2>/dev/null || echo "⏭️ db-database: no existe aún o ya está en state"
-
-          terraform import \
-            azurerm_key_vault_secret.db_username \
-            "${KV_BASE}/db-username" 2>/dev/null || echo "⏭️ db-username: no existe aún o ya está en state"
-
-          terraform import \
-            azurerm_key_vault_secret.db_password \
-            "${KV_BASE}/db-password" 2>/dev/null || echo "⏭️ db-password: no existe aún o ya está en state"
-
-          echo "✅ Importación completada"
-        env:
-          TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          TF_VAR_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
-          TF_VAR_location: ${{ secrets.TF_VAR_LOCATION }}
-          TF_VAR_resource_group_name: ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }}
-          TF_VAR_vnet_name: ${{ secrets.TF_VAR_VNET_NAME }}
-          TF_VAR_sql_server_name: ${{ secrets.TF_VAR_SQL_SERVER_NAME }}
-          TF_VAR_database_name: ${{ secrets.TF_VAR_DATABASE_NAME }}
-          TF_VAR_sql_admin_login: ${{ secrets.TF_VAR_SQL_ADMIN_LOGIN }}
-          TF_VAR_sql_admin_password: ${{ secrets.TF_VAR_SQL_ADMIN_PASSWORD }}
-          TF_VAR_app_service_plan_name: ${{ secrets.TF_VAR_APP_SERVICE_PLAN_NAME }}
-          TF_VAR_app_service_plan_name_web: ${{ secrets.TF_VAR_APP_SERVICE_PLAN_NAME_WEB }}
-          TF_VAR_app_service_name: ${{ secrets.TF_VAR_APP_SERVICE_NAME }}
-          TF_VAR_app_service_name_web: ${{ secrets.TF_VAR_APP_SERVICE_NAME_WEB }}
-          TF_VAR_key_vault_name: ${{ secrets.TF_VAR_KEY_VAULT_NAME }}
-          TF_VAR_admin_user_object_id: ${{ secrets.TF_VAR_ADMIN_USER_OBJECT_ID }}
-          TF_VAR_github_principal_id: ${{ secrets.TF_VAR_GITHUB_PRINCIPAL_ID }}
-          TF_VAR_azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
-          TF_VAR_storage_account_name: ${{ secrets.TF_VAR_STORAGE_ACCOUNT_NAME }}
-          TF_VAR_cert_data: ${{ secrets.TF_VAR_CERT_DATA }}
-          TF_VAR_cert_password: ${{ secrets.TF_VAR_CERT_PASSWORD }}
-          TF_VAR_enable_elastic: ${{ secrets.TF_VAR_ENABLE_ELASTIC }}
-          TF_VAR_enable_otel: ${{ secrets.TF_VAR_ENABLE_OTEL }}
-          TF_VAR_acr_name: ${{ secrets.TF_VAR_ACR_NAME }}
 
       # ============================================================
       # FASE 3: Apply completo — la imagen ya existe en ACR
       # ============================================================
-      - name: "FASE 3: Terraform Apply — infraestructura completa"
+      - name: "FASE 3: Terraform Apply MAIN"
         working-directory: infra/main
-        run: |
-          echo "🏗️ Desplegando infraestructura completa..."
-          terraform apply -auto-approve
-          echo "✅ Infraestructura completa desplegada"
+        run: terraform apply -auto-approve
         env:
           TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
@@ -189,46 +121,3 @@ jobs:
           TF_VAR_enable_elastic: ${{ secrets.TF_VAR_ENABLE_ELASTIC }}
           TF_VAR_enable_otel: ${{ secrets.TF_VAR_ENABLE_OTEL }}
           TF_VAR_acr_name: ${{ secrets.TF_VAR_ACR_NAME }}
-
-      # 🔟 Restart del Container Instance
-      - name: Restart OTel Collector Container
-        run: |
-          echo "🔄 Reiniciando OTel Collector..."
-          az container restart \
-            --resource-group ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }} \
-            --name otel-collector-container
-          echo "✅ Container reiniciado"
-
-      # 1️⃣1️⃣ Verificar que el container quedó Running
-      - name: Verify OTel Collector Status
-        run: |
-          sleep 15
-          STATUS=$(az container show \
-            --resource-group ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }} \
-            --name otel-collector-container \
-            --query "instanceView.state" -o tsv)
-          echo "Estado del container: $STATUS"
-          if [ "$STATUS" != "Running" ]; then
-            echo "❌ OTel Collector no está Running — logs:"
-            az container logs \
-              --resource-group ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }} \
-              --name otel-collector-container
-            exit 1
-          fi
-          echo "✅ OTel Collector Running correctamente"
-
-      # 1️⃣2️⃣ Resumen final
-      - name: Summary
-        run: |
-          echo "## ✅ Infraestructura desplegada!" >> $GITHUB_STEP_SUMMARY
-          echo "| Recurso | Valor |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| ACR | ${{ env.ACR_LOGIN_SERVER }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| OTel Image | ${{ env.ACR_LOGIN_SERVER }}/otel-collector-custom:${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| State | ${{ secrets.TF_VAR_STORAGE_ACCOUNT_NAME }}/tfstate/main.tfstate |" >> $GITHUB_STEP_SUMMARY
-          echo "| Deployed at | $(date) |" >> $GITHUB_STEP_SUMMARY
-
-      # 1️⃣3️⃣ Azure Logout
-      - name: Azure Logout
-        if: always()
-        run: az logout || true
