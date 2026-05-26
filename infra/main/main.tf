@@ -1,8 +1,6 @@
 # ============================================================
 # INFRAESTRUCTURA MULTIMODULO - ORDEN OPTIMIZADO DE DESPLIEGUE
 # ============================================================
-# Este archivo está organizado en el orden correcto de creación
-# para evitar errores de dependencias durante el despliegue
 
 terraform {
   required_providers {
@@ -15,6 +13,9 @@ terraform {
       version = "~> 0.9"
     }
   }
+
+  # ⭐ Backend remoto — persiste el state en Azure Storage
+  backend "azurerm" {}
 }
 
 provider "azurerm" {
@@ -206,7 +207,19 @@ resource "azurerm_storage_container" "uploads" {
   ]
 }
 
-# 3.3 - STORAGE SHARE: Elasticsearch Data (condicional)
+# 3.3 - STORAGE CONTAINER: Terraform State
+# ============================================================
+resource "azurerm_storage_container" "tfstate" {
+  name                  = "tfstate"
+  storage_account_name  = azurerm_storage_account.storage.name
+  container_access_type = "private"
+
+  depends_on = [
+    azurerm_storage_account.storage
+  ]
+}
+
+# 3.4 - STORAGE SHARE: Elasticsearch Data (condicional)
 # ============================================================
 resource "azurerm_storage_share" "elasticsearch" {
   count                = var.enable_elastic == "true" ? 1 : 0
@@ -496,7 +509,7 @@ resource "azurerm_container_group" "kibana" {
 }
 
 # 6.3 - OPENTELEMETRY COLLECTOR CONTAINER (condicional)
-# ⭐ ACTUALIZADO: Ahora usa imagen custom desde ACR (sin File Share)
+# ⭐ Usa imagen custom desde ACR (sin File Share)
 # ============================================================
 resource "azurerm_container_group" "otel_collector" {
   count               = var.enable_otel == "true" ? 1 : 0
@@ -505,7 +518,6 @@ resource "azurerm_container_group" "otel_collector" {
   resource_group_name = azurerm_resource_group.rg.name
   os_type             = "Linux"
 
-  # ⭐ Credenciales para pull desde ACR
   image_registry_credential {
     server   = azurerm_container_registry.acr.login_server
     username = azurerm_container_registry.acr.admin_username
@@ -513,10 +525,9 @@ resource "azurerm_container_group" "otel_collector" {
   }
 
   container {
-    name  = "otel-collector"
-    # ⭐ Imagen custom desde ACR (config ya embebida dentro)
-    image = "${azurerm_container_registry.acr.login_server}/otel-collector-custom:latest"
-    cpu   = "1"
+    name   = "otel-collector"
+    image  = "${azurerm_container_registry.acr.login_server}/otel-collector-custom:latest"
+    cpu    = "1"
     memory = "2"
 
     ports {
@@ -533,8 +544,6 @@ resource "azurerm_container_group" "otel_collector" {
       "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.main.connection_string
       "ELASTICSEARCH_HOST"                    = var.enable_elastic == "true" ? azurerm_container_group.elasticsearch[0].ip_address : ""
     }
-
-    # ⭐ ELIMINADO: volumen de File Share — config va dentro de la imagen
   }
 
   ip_address_type = "Private"
@@ -635,14 +644,14 @@ resource "azurerm_linux_web_app" "backend" {
     "ELASTICSEARCH_HOST"    = var.enable_elastic == "true" ? azurerm_container_group.elasticsearch[0].ip_address : ""
     "ELASTICSEARCH_PORT"    = "9200"
 
-    # ⭐ OpenTelemetry Configuration
-    "JAVA_TOOL_OPTIONS"               = "-javaagent:/home/site/wwwroot/otel/opentelemetry-javaagent.jar"
-    "OTEL_SERVICE_NAME"               = "spring-boot-backend"
-    "OTEL_EXPORTER_OTLP_ENDPOINT"     = var.enable_otel == "true" ? "http://${azurerm_container_group.otel_collector[0].ip_address}:4318" : ""
-    "OTEL_EXPORTER_OTLP_PROTOCOL"     = "http/protobuf"
-    "OTEL_TRACES_EXPORTER"            = "otlp"
-    "OTEL_METRICS_EXPORTER"           = "otlp"
-    "OTEL_LOGS_EXPORTER"              = "otlp"
+    # OpenTelemetry Configuration
+    "JAVA_TOOL_OPTIONS"           = "-javaagent:/home/site/wwwroot/otel/opentelemetry-javaagent.jar"
+    "OTEL_SERVICE_NAME"           = "spring-boot-backend"
+    "OTEL_EXPORTER_OTLP_ENDPOINT" = var.enable_otel == "true" ? "http://${azurerm_container_group.otel_collector[0].ip_address}:4318" : ""
+    "OTEL_EXPORTER_OTLP_PROTOCOL" = "http/protobuf"
+    "OTEL_TRACES_EXPORTER"        = "otlp"
+    "OTEL_METRICS_EXPORTER"       = "otlp"
+    "OTEL_LOGS_EXPORTER"          = "otlp"
 
     # Application Insights
     "APPLICATIONINSIGHTS_CONNECTION_STRING"      = azurerm_application_insights.main.connection_string

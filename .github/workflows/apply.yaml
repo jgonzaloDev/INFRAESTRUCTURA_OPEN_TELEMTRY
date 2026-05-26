@@ -30,24 +30,32 @@ jobs:
         with:
           terraform_wrapper: false
 
-      # 4️⃣ Terraform Init
+      # 4️⃣ Terraform Init con backend remoto en Azure Storage
       - name: Terraform Init
         working-directory: infra/main
-        run: terraform init
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }}" \
+            -backend-config="storage_account_name=${{ secrets.TF_VAR_STORAGE_ACCOUNT_NAME }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=main.tfstate"
 
       # ============================================================
-      # FASE 1: Crear solo el ACR (sin el Container Instance)
+      # FASE 1: Crear solo Resource Group + Storage + ACR
+      # (el Storage necesita existir antes para el container tfstate)
       # ============================================================
 
-      # 5️⃣ Terraform Apply FASE 1 — solo ACR
-      - name: "FASE 1: Terraform Apply — solo ACR"
+      - name: "FASE 1: Terraform Apply — Resource Group + Storage + ACR"
         working-directory: infra/main
         run: |
-          echo "🏗️ Creando Azure Container Registry..."
+          echo "🏗️ Creando Resource Group, Storage Account y ACR..."
           terraform apply -auto-approve \
             -target=azurerm_resource_group.rg \
+            -target=azurerm_storage_account.storage \
+            -target=azurerm_storage_container.tfstate \
+            -target=azurerm_storage_container.uploads \
             -target=azurerm_container_registry.acr
-          echo "✅ ACR creado"
+          echo "✅ Fase 1 completada"
         env:
           TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
@@ -73,49 +81,39 @@ jobs:
           TF_VAR_enable_otel: ${{ secrets.TF_VAR_ENABLE_OTEL }}
           TF_VAR_acr_name: ${{ secrets.TF_VAR_ACR_NAME }}
 
-      # 6️⃣ Capturar outputs del ACR
+      # ============================================================
+      # FASE 2: Build y Push imagen OTel al ACR
+      # ============================================================
+
       - name: Capturar outputs ACR
         working-directory: infra/main
         run: |
-          echo "📤 Leyendo outputs de Terraform..."
           ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
           ACR_NAME=$(terraform output -raw acr_name)
           echo "ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER" >> $GITHUB_ENV
           echo "ACR_NAME=$ACR_NAME" >> $GITHUB_ENV
           echo "✅ ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER"
-          echo "✅ ACR_NAME=$ACR_NAME"
 
-      # ============================================================
-      # FASE 2: Build y Push imagen OTel al ACR
-      # ============================================================
-
-      # 7️⃣ Login al ACR
       - name: "FASE 2: Login to ACR"
         run: |
-          echo "🔐 Login al Container Registry..."
           az acr login --name ${{ env.ACR_NAME }}
-          echo "✅ Login OK"
+          echo "✅ Login ACR OK"
 
-      # 8️⃣ Build & Push imagen OTel custom
       - name: "FASE 2: Build & Push imagen OTel Collector"
         run: |
           echo "🐳 Building imagen custom OTel Collector..."
-
           docker build \
             -t ${{ env.ACR_LOGIN_SERVER }}/otel-collector-custom:latest \
             -t ${{ env.ACR_LOGIN_SERVER }}/otel-collector-custom:${{ github.sha }} \
             ./infra/main/
-
           docker push ${{ env.ACR_LOGIN_SERVER }}/otel-collector-custom:latest
           docker push ${{ env.ACR_LOGIN_SERVER }}/otel-collector-custom:${{ github.sha }}
-
           echo "✅ Imagen pushed correctamente"
 
       # ============================================================
-      # FASE 3: Apply completo — ahora la imagen ya existe en ACR
+      # FASE 3: Apply completo — la imagen ya existe en ACR
       # ============================================================
 
-      # 9️⃣ Terraform Apply FASE 3 — infraestructura completa
       - name: "FASE 3: Terraform Apply — infraestructura completa"
         working-directory: infra/main
         run: |
@@ -164,9 +162,7 @@ jobs:
             --resource-group ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }} \
             --name otel-collector-container \
             --query "instanceView.state" -o tsv)
-
           echo "Estado del container: $STATUS"
-
           if [ "$STATUS" != "Running" ]; then
             echo "❌ OTel Collector no está Running — logs:"
             az container logs \
@@ -174,7 +170,6 @@ jobs:
               --name otel-collector-container
             exit 1
           fi
-
           echo "✅ OTel Collector Running correctamente"
 
       # 1️⃣2️⃣ Resumen final
@@ -185,6 +180,7 @@ jobs:
           echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| ACR | ${{ env.ACR_LOGIN_SERVER }} |" >> $GITHUB_STEP_SUMMARY
           echo "| OTel Image | ${{ env.ACR_LOGIN_SERVER }}/otel-collector-custom:${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| State | ${{ secrets.TF_VAR_STORAGE_ACCOUNT_NAME }}/tfstate/main.tfstate |" >> $GITHUB_STEP_SUMMARY
           echo "| Deployed at | $(date) |" >> $GITHUB_STEP_SUMMARY
 
       # 1️⃣3️⃣ Azure Logout
