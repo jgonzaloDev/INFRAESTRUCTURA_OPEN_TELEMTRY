@@ -521,6 +521,18 @@ resource "azurerm_linux_web_app" "backend" {
     "ELASTICSEARCH_HOST"    = var.enable_elastic == "true" ? azurerm_container_group.elasticsearch[0].ip_address : ""
     "ELASTICSEARCH_PORT"    = "9200"
 
+    # 🌐 Aplicación Spring Boot
+    "SPRING_APPLICATION_NAME"     = "app"
+    "SERVER_SERVLET_CONTEXT_PATH" = "/api"
+
+    # 🗂️ Azure Blob Storage
+    "CONNECTION_STRING_BLOB_STORAGE" = azurerm_storage_account.storage.primary_connection_string
+    "CONTAINER_NAME_CUSTOMER"        = "images"
+    "CONTAINER_NAME_ORDER"           = "images"
+
+    # 📊 OpenTelemetry — variable clave que esperaba tu backend
+    "OTEL_EXPORTER_OTLP_HTTP" = var.enable_otel == "true" ? "http://${azurerm_container_group.otel_collector[0].ip_address}:4318" : ""
+
     "JAVA_TOOL_OPTIONS"           = "-javaagent:/home/site/wwwroot/otel/opentelemetry-javaagent.jar"
     "OTEL_SERVICE_NAME"           = "spring-boot-backend"
     "OTEL_EXPORTER_OTLP_ENDPOINT" = var.enable_otel == "true" ? "http://${azurerm_container_group.otel_collector[0].ip_address}:4318" : ""
