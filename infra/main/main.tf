@@ -506,45 +506,49 @@ resource "azurerm_linux_web_app" "backend" {
   }
 
   app_settings = {
-    "SPRING_PROFILES_ACTIVE" = "production"
+    # 🗄️ Base de datos SQL Server (TEXTO PLANO — como el antiguo)
+    "SQL_SERVER"                              = azurerm_mssql_server.sql_server.fully_qualified_domain_name
+    "SQL_DATABASE"                            = var.database_name
+    "SQL_USER"                                = var.sql_admin_login
+    "SQL_PASSWORD"                            = var.sql_admin_password
+    "SPRING_DATASOURCE_DRIVER_CLASS_NAME"     = "com.microsoft.sqlserver.jdbc.SQLServerDriver"
+    "SPRING_DATASOURCE_URL"                   = "jdbc:sqlserver://${azurerm_mssql_server.sql_server.fully_qualified_domain_name}:1433;databaseName=${var.database_name};encrypt=true;trustServerCertificate=false;loginTimeout=30;"
+    "SPRING_DATASOURCE_USERNAME"              = var.sql_admin_login
+    "SPRING_DATASOURCE_PASSWORD"              = var.sql_admin_password
 
-    "SPRING_DATASOURCE_URL"               = "jdbc:sqlserver://${azurerm_mssql_server.sql_server.fully_qualified_domain_name}:1433;database=@Microsoft.KeyVault(SecretUri=https://${var.key_vault_name}.vault.azure.net/secrets/db-database/);encrypt=true;trustServerCertificate=false;"
-    "SPRING_DATASOURCE_USERNAME"          = "@Microsoft.KeyVault(SecretUri=https://${var.key_vault_name}.vault.azure.net/secrets/db-username/)"
-    "SPRING_DATASOURCE_PASSWORD"          = "@Microsoft.KeyVault(SecretUri=https://${var.key_vault_name}.vault.azure.net/secrets/db-password/)"
-    "SPRING_DATASOURCE_DRIVER_CLASS_NAME" = "com.microsoft.sqlserver.jdbc.SQLServerDriver"
+    # 🔍 Application Insights — DESHABILITADO (como el antiguo)
+    "APPLICATIONINSIGHTS_ENABLED"             = "false"
+    "ApplicationInsightsAgent_EXTENSION_VERSION" = "disabled"
 
-    "SPRING_JPA_HIBERNATE_DDL_AUTO"           = "create-drop"
-    "SPRING_JPA_SHOW_SQL"                     = "false"
-    "SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT" = "org.hibernate.dialect.SQLServerDialect"
-
-    "ELASTICSEARCH_ENABLED" = var.enable_elastic
-    "ELASTICSEARCH_HOST"    = var.enable_elastic == "true" ? azurerm_container_group.elasticsearch[0].ip_address : ""
-    "ELASTICSEARCH_PORT"    = "9200"
-
-    # 🌐 Aplicación Spring Boot
-    "SPRING_APPLICATION_NAME"     = "app"
-    "SERVER_SERVLET_CONTEXT_PATH" = "/api"
-
-    # 🗂️ Azure Blob Storage
-    "CONNECTION_STRING_BLOB_STORAGE" = azurerm_storage_account.storage.primary_connection_string
-    "CONTAINER_NAME_CUSTOMER"        = "images"
-    "CONTAINER_NAME_ORDER"           = "images"
-
-    # 📊 OpenTelemetry — variable clave que esperaba tu backend
-    "OTEL_EXPORTER_OTLP_HTTP" = var.enable_otel == "true" ? "http://${azurerm_container_group.otel_collector[0].ip_address}:4318" : ""
-
+    # 📊 OpenTelemetry (adaptado a ACI)
     "JAVA_TOOL_OPTIONS"           = "-javaagent:/home/site/wwwroot/otel/opentelemetry-javaagent.jar"
     "OTEL_SERVICE_NAME"           = "spring-boot-backend"
     "OTEL_EXPORTER_OTLP_ENDPOINT" = var.enable_otel == "true" ? "http://${azurerm_container_group.otel_collector[0].ip_address}:4318" : ""
     "OTEL_EXPORTER_OTLP_PROTOCOL" = "http/protobuf"
+    "OTEL_EXPORTER_OTLP_HTTP"     = var.enable_otel == "true" ? "http://${azurerm_container_group.otel_collector[0].ip_address}:4318" : ""
     "OTEL_TRACES_EXPORTER"        = "otlp"
     "OTEL_METRICS_EXPORTER"       = "otlp"
     "OTEL_LOGS_EXPORTER"          = "otlp"
 
-    "APPLICATIONINSIGHTS_CONNECTION_STRING"      = azurerm_application_insights.main.connection_string
-    "ApplicationInsightsAgent_EXTENSION_VERSION" = "~3"
+    # 🌐 Aplicación Spring Boot
+    "SERVER_PORT"                 = "8080"
+    "SPRING_APPLICATION_NAME"     = "app"
+    "SPRING_PROFILES_ACTIVE"      = "production"
+    "SERVER_SERVLET_CONTEXT_PATH" = "/api"
 
-    "SERVER_PORT" = "8080"
+    # 🗂️ Azure Blob Storage
+    "CONNECTION_STRING_BLOB_STORAGE" = azurerm_storage_account.storage.secondary_connection_string
+    "CONTAINER_NAME_CUSTOMER"       = "images"
+    "CONTAINER_NAME_ORDER"          = "images"
+
+    # 🧩 JPA / Hibernate
+    "SPRING_JPA_HIBERNATE_DDL_AUTO"           = "create-drop"
+    "SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT" = "org.hibernate.dialect.SQLServerDialect"
+    "SPRING_JPA_SHOW_SQL"                     = "false"
+
+    # 🔍 Elasticsearch
+    "ELASTICSEARCH_ENABLED" = "false"
+    "ELASTICSEARCH_PORT"    = "9200"
   }
 
   depends_on = [
