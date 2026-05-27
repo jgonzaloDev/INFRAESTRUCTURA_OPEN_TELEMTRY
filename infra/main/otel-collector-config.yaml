@@ -21,32 +21,29 @@ exporters:
   # Azure Application Insights
   azuremonitor:
     connection_string: "${APPLICATIONINSIGHTS_CONNECTION_STRING}"
-    
-  # Debug/Logging
-  logging:
-    loglevel: info
+
+  # Debug/Logging — "logging" fue renombrado a "debug" en contrib reciente
+  debug:
+    verbosity: basic
     sampling_initial: 5
     sampling_thereafter: 200
 
 service:
   pipelines:
-    # Traces - envía a Application Insights
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [azuremonitor, logging]
-    
-    # Logs - envía a Application Insights
+      exporters: [azuremonitor, debug]
+
     logs:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [azuremonitor, logging]
-    
-    # Metrics - envía a Application Insights
+      exporters: [azuremonitor, debug]
+
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [azuremonitor, logging]
+      exporters: [azuremonitor, debug]
 
   telemetry:
     logs:
