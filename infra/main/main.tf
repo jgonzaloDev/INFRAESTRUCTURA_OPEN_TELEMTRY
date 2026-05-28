@@ -190,6 +190,15 @@ resource "azurerm_mssql_server" "sql_server" {
   depends_on = [azurerm_resource_group.rg]
 }
 
+resource "azurerm_mssql_firewall_rule" "allow_azure_services" {
+  name             = "AllowAzureServices"
+  server_id        = azurerm_mssql_server.sql_server.id
+  start_ip_address = "0.0.0.0"
+  end_ip_address   = "0.0.0.0"
+
+  depends_on = [azurerm_mssql_server.sql_server]
+}
+
 resource "azurerm_mssql_database" "database" {
   name      = var.database_name
   server_id = azurerm_mssql_server.sql_server.id
@@ -586,9 +595,26 @@ resource "azurerm_linux_web_app" "frontend" {
 
     "SCM_DO_BUILD_DURING_DEPLOYMENT" = "true"
     "WEBSITE_NODE_DEFAULT_VERSION"   = "20-lts"
+
+    # 🗂️ Azure Blob Storage (acceso via Managed Identity)
+    "AZURE_STORAGE_ACCOUNT_NAME"   = azurerm_storage_account.storage.name
+    "AZURE_STORAGE_CONTAINER_NAME" = "images"
+    "AZURE_STORAGE_ENDPOINT"       = "https://${azurerm_storage_account.storage.name}.blob.core.windows.net"
   }
 
   depends_on = [azurerm_service_plan.plan_frontend]
+}
+
+# Frontend Blob Reader Role (Managed Identity)
+resource "azurerm_role_assignment" "frontend_blob_reader" {
+  scope                = azurerm_storage_account.storage.id
+  role_definition_name = "Storage Blob Data Reader"
+  principal_id         = azurerm_linux_web_app.frontend.identity[0].principal_id
+
+  depends_on = [
+    azurerm_linux_web_app.frontend,
+    azurerm_storage_account.storage
+  ]
 }
 
 resource "azurerm_role_assignment" "backend_kv_secrets" {
@@ -613,7 +639,47 @@ resource "azurerm_app_service_virtual_network_swift_connection" "backend_integra
 }
 
 # ============================================================
-# FASE 8: PRIVATE ENDPOINTS
+# FASE 8: PRIVATE DNS ZONES
+# ============================================================
+
+# Private DNS Zone para App Services
+resource "azurerm_private_dns_zone" "appservice" {
+  name                = "privatelink.azurewebsites.net"
+  resource_group_name = azurerm_resource_group.rg.name
+
+  depends_on = [azurerm_resource_group.rg]
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "appservice_link" {
+  name                  = "vnet-link-appservice"
+  resource_group_name   = azurerm_resource_group.rg.name
+  private_dns_zone_name = azurerm_private_dns_zone.appservice.name
+  virtual_network_id    = azurerm_virtual_network.vnet.id
+  registration_enabled  = false
+
+  depends_on = [azurerm_private_dns_zone.appservice]
+}
+
+# Private DNS Zone para Blob Storage
+resource "azurerm_private_dns_zone" "blob" {
+  name                = "privatelink.blob.core.windows.net"
+  resource_group_name = azurerm_resource_group.rg.name
+
+  depends_on = [azurerm_resource_group.rg]
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "blob_link" {
+  name                  = "vnet-link-blob"
+  resource_group_name   = azurerm_resource_group.rg.name
+  private_dns_zone_name = azurerm_private_dns_zone.blob.name
+  virtual_network_id    = azurerm_virtual_network.vnet.id
+  registration_enabled  = false
+
+  depends_on = [azurerm_private_dns_zone.blob]
+}
+
+# ============================================================
+# FASE 9: PRIVATE ENDPOINTS
 # ============================================================
 
 resource "azurerm_private_endpoint" "backend_pe" {
@@ -629,9 +695,15 @@ resource "azurerm_private_endpoint" "backend_pe" {
     is_manual_connection           = false
   }
 
+  private_dns_zone_group {
+    name                 = "dns-group-backend"
+    private_dns_zone_ids = [azurerm_private_dns_zone.appservice.id]
+  }
+
   depends_on = [
     azurerm_subnet.subnet_pe,
-    azurerm_linux_web_app.backend
+    azurerm_linux_web_app.backend,
+    azurerm_private_dns_zone.appservice
   ]
 }
 
@@ -648,9 +720,15 @@ resource "azurerm_private_endpoint" "frontend_pe" {
     is_manual_connection           = false
   }
 
+  private_dns_zone_group {
+    name                 = "dns-group-frontend"
+    private_dns_zone_ids = [azurerm_private_dns_zone.appservice.id]
+  }
+
   depends_on = [
     azurerm_subnet.subnet_pe,
-    azurerm_linux_web_app.frontend
+    azurerm_linux_web_app.frontend,
+    azurerm_private_dns_zone.appservice
   ]
 }
 
@@ -705,10 +783,217 @@ resource "azurerm_private_endpoint" "blob_pe" {
     is_manual_connection           = false
   }
 
+  private_dns_zone_group {
+    name                 = "dns-group-blob"
+    private_dns_zone_ids = [azurerm_private_dns_zone.blob.id]
+  }
+
   depends_on = [
     azurerm_subnet.subnet_pe,
-    azurerm_storage_account.storage
+    azurerm_storage_account.storage,
+    azurerm_private_dns_zone.blob
   ]
+}
+
+# ============================================================
+# FASE 10: APPLICATION GATEWAY
+# ============================================================
+
+resource "azurerm_public_ip" "appgw_pip" {
+  name                = "pip-appgw"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = var.location
+  allocation_method   = "Static"
+  sku                 = "Standard"
+
+  depends_on = [azurerm_resource_group.rg]
+}
+
+locals {
+  backend_pool_frontend_name     = "pool-frontend"
+  backend_pool_backend_name      = "pool-backend"
+  frontend_port_name_https       = "frontend-port-https"
+  frontend_ip_configuration_name = "frontend-ip"
+  http_setting_frontend_name     = "setting-frontend"
+  http_setting_backend_name      = "setting-backend"
+  listener_name_https            = "https-listener"
+  request_routing_rule_name      = "routing-rule-https"
+  ssl_certificate_name           = "cert-app-dojo"
+  url_path_map_name              = "url-path-map"
+}
+
+resource "azurerm_application_gateway" "appgw" {
+  name                = "${var.resource_group_name}-appgw"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = var.location
+
+  sku {
+    name     = "Standard_v2"
+    tier     = "Standard_v2"
+    capacity = 2
+  }
+
+  gateway_ip_configuration {
+    name      = "gateway-ip-config"
+    subnet_id = azurerm_subnet.subnet_agw.id
+  }
+
+  ssl_policy {
+    policy_type = "Predefined"
+    policy_name = "AppGwSslPolicy20220101"
+  }
+
+  # Puerto HTTPS (443)
+  frontend_port {
+    name = local.frontend_port_name_https
+    port = 443
+  }
+
+  frontend_ip_configuration {
+    name                 = local.frontend_ip_configuration_name
+    public_ip_address_id = azurerm_public_ip.appgw_pip.id
+  }
+
+  # Certificado SSL/TLS (PFX)
+  ssl_certificate {
+    name     = local.ssl_certificate_name
+    data     = var.cert_data
+    password = var.cert_password
+  }
+
+  # Backend Pool - Frontend (IP Privada via Private Endpoint)
+  backend_address_pool {
+    name         = local.backend_pool_frontend_name
+    ip_addresses = [azurerm_private_endpoint.frontend_pe.private_service_connection[0].private_ip_address]
+  }
+
+  # Backend Pool - Backend (IP Privada via Private Endpoint)
+  backend_address_pool {
+    name         = local.backend_pool_backend_name
+    ip_addresses = [azurerm_private_endpoint.backend_pe.private_service_connection[0].private_ip_address]
+  }
+
+  # Health Probe - Frontend
+  probe {
+    name                                      = "health-probe-frontend"
+    protocol                                  = "Https"
+    path                                      = "/"
+    interval                                  = 30
+    timeout                                   = 30
+    unhealthy_threshold                       = 3
+    pick_host_name_from_backend_http_settings = true
+    match {
+      status_code = ["200-399"]
+    }
+  }
+
+  # Health Probe - Backend
+  probe {
+    name                                      = "probe-backend"
+    protocol                                  = "Https"
+    path                                      = "/api/customer"
+    interval                                  = 30
+    timeout                                   = 30
+    unhealthy_threshold                       = 3
+    pick_host_name_from_backend_http_settings = true
+    match {
+      status_code = ["200-399"]
+    }
+  }
+
+  # HTTP Settings - Frontend
+  backend_http_settings {
+    name                                = local.http_setting_frontend_name
+    cookie_based_affinity               = "Disabled"
+    port                                = 443
+    protocol                            = "Https"
+    request_timeout                     = 60
+    pick_host_name_from_backend_address = false
+    host_name                           = azurerm_linux_web_app.frontend.default_hostname
+    probe_name                          = "health-probe-frontend"
+  }
+
+  # HTTP Settings - Backend
+  backend_http_settings {
+    name                                = local.http_setting_backend_name
+    cookie_based_affinity               = "Disabled"
+    port                                = 443
+    protocol                            = "Https"
+    request_timeout                     = 60
+    pick_host_name_from_backend_address = false
+    host_name                           = azurerm_linux_web_app.backend.default_hostname
+    probe_name                          = "probe-backend"
+  }
+
+  # Listener HTTPS con certificado SSL
+  http_listener {
+    name                           = local.listener_name_https
+    frontend_ip_configuration_name = local.frontend_ip_configuration_name
+    frontend_port_name             = local.frontend_port_name_https
+    protocol                       = "Https"
+    ssl_certificate_name           = local.ssl_certificate_name
+  }
+
+  # URL Path Map — enrutamiento basado en rutas
+  url_path_map {
+    name                               = local.url_path_map_name
+    default_backend_address_pool_name  = local.backend_pool_frontend_name
+    default_backend_http_settings_name = local.http_setting_frontend_name
+
+    # Regla para Frontend - /web/*
+    path_rule {
+      name                       = "frontend-rule"
+      paths                      = ["/web/*"]
+      backend_address_pool_name  = local.backend_pool_frontend_name
+      backend_http_settings_name = local.http_setting_frontend_name
+    }
+
+    # Regla para Backend - /customer*
+    path_rule {
+      name                       = "backend-rule"
+      paths                      = ["/api/customer*"]
+      backend_address_pool_name  = local.backend_pool_backend_name
+      backend_http_settings_name = local.http_setting_backend_name
+    }
+
+    # Regla para Backend - /order*
+    path_rule {
+      name                       = "backend-rule2"
+      paths                      = ["/api/order*"]
+      backend_address_pool_name  = local.backend_pool_backend_name
+      backend_http_settings_name = local.http_setting_backend_name
+    }
+
+    # Regla para Backend - /otel/v1/traces*
+    path_rule {
+      name                       = "backend-rule3"
+      paths                      = ["/api/otel/v1/traces*"]
+      backend_address_pool_name  = local.backend_pool_backend_name
+      backend_http_settings_name = local.http_setting_backend_name
+    }
+  }
+
+  # Regla de enrutamiento HTTPS con path-based routing
+  request_routing_rule {
+    name               = local.request_routing_rule_name
+    rule_type          = "PathBasedRouting"
+    http_listener_name = local.listener_name_https
+    url_path_map_name  = local.url_path_map_name
+    priority           = 100
+  }
+
+  depends_on = [
+    azurerm_private_endpoint.frontend_pe,
+    azurerm_private_endpoint.backend_pe,
+    azurerm_private_dns_zone_virtual_network_link.appservice_link,
+    azurerm_public_ip.appgw_pip
+  ]
+
+  tags = {
+    Environment = "Production"
+    ManagedBy   = "Terraform"
+    Purpose     = "LoadBalancer"
+  }
 }
 
 # ============================================================
@@ -737,4 +1022,8 @@ output "acr_name" {
 
 output "otel_collector_ip" {
   value = var.enable_otel == "true" ? azurerm_container_group.otel_collector[0].ip_address : "Not deployed"
+}
+
+output "appgw_public_ip" {
+  value = azurerm_public_ip.appgw_pip.ip_address
 }
