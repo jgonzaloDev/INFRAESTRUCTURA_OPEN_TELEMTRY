@@ -190,15 +190,6 @@ resource "azurerm_mssql_server" "sql_server" {
   depends_on = [azurerm_resource_group.rg]
 }
 
-resource "azurerm_mssql_firewall_rule" "allow_azure_services" {
-  name             = "AllowAzureServices"
-  server_id        = azurerm_mssql_server.sql_server.id
-  start_ip_address = "0.0.0.0"
-  end_ip_address   = "0.0.0.0"
-
-  depends_on = [azurerm_mssql_server.sql_server]
-}
-
 resource "azurerm_mssql_database" "database" {
   name      = var.database_name
   server_id = azurerm_mssql_server.sql_server.id
